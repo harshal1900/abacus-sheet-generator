@@ -52,9 +52,36 @@ test('questions vary in operation, digits and number of rows', () => {
   assert.ok(lengths.size >= 2, 'expected varied digit lengths');
 });
 
-test('all levels mode mixes levels', () => {
+test('all levels mode mixes levels 1-8 and Quick Drill cards', () => {
   const sheet = gen.generateWorksheet('all', 200);
-  assert.strictEqual(new Set(sheet.questions.map((q) => q.level)).size, 8);
+  assert.strictEqual(new Set(sheet.questions.map((q) => q.level)).size, 9);
+});
+
+test('all levels mode has about 12% Quick Drill cards: 3-10 digits × 2 or × 5, exact', () => {
+  let quick = 0, total = 0;
+  const lengths = new Set(), multipliers = new Set();
+  for (let s = 0; s < 40; s++) {
+    for (const q of gen.generateWorksheet('all', 200).questions) {
+      total++;
+      if (q.type !== 'quick') continue;
+      quick++;
+      assert.strictEqual(q.level, 'quick');
+      assert.match(q.lines[0], /^[1-9]\d{2,9}$/);
+      lengths.add(q.lines[0].length);
+      multipliers.add(q.lines[1]);
+      checkAnswer(q);
+    }
+  }
+  const share = quick / total;
+  assert.ok(share > 0.08 && share < 0.16, 'quick share ' + share);
+  assert.strictEqual(lengths.size, 8, 'every length from 3 to 10 shows up');
+  assert.deepStrictEqual([...multipliers].sort(), ['×2', '×5']);
+});
+
+test('single levels never get Quick Drill cards', () => {
+  for (let level = 1; level <= 8; level++) {
+    assert.ok(!gen.generateWorksheet(level, 300).questions.some((q) => q.type === 'quick'));
+  }
 });
 
 test('count is clamped to 10..500', () => {

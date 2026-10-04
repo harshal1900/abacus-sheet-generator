@@ -51,7 +51,7 @@
 
   levelsBox.appendChild(tile('all', 'All Levels', 'Mix it up', 'A surprise mix of every level, from easy sums to roots and fractions', ''));
   levelsBox.appendChild(tile('quick', QUICK.name, QUICK.stage,
-    QUICK.digits + '-digit numbers × ' + QUICK.multipliers.join(' and × ') + ', as fast as you can', rgb(QUICK.tint)));
+    (Array.isArray(QUICK.digits) ? QUICK.digits.join('-') : QUICK.digits) + '-digit numbers × ' + QUICK.multipliers.join(' and × ') + ', as fast as you can', rgb(QUICK.tint)));
   Object.keys(LEVELS).forEach(function (k) {
     var L = LEVELS[k];
     levelsBox.appendChild(tile(Number(k), L.name, L.stage, L.about, rgb(L.tint)));

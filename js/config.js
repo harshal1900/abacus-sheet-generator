@@ -179,15 +179,21 @@
   var QUICK_DRILL = {
     name: 'Quick Drill', stage: 'Speed',
     about: 'Big numbers × 2 and × 5, as fast as you can',
+    tag: 'QD',            // small tag on Quick Drill cards in All Levels mode
     tint: [233, 236, 239],
-    digits: 8,            // digits in each number (no leading zero)
+    digits: [3, 10],      // each row's number gets a random length in this range
+                          // (no leading zero); use [8, 8] for a fixed length
     multipliers: [2, 5],  // one answer column per multiplier: "Quick-2", "Quick-5"
     rowsPerTable: 6
   };
 
+  // All Levels mode: share of questions that are Quick Drill cards
+  // (a 3-10 digit number × 2 or × 5). The rest come from levels 1-8.
+  var ALL_LEVELS = { quickShare: 0.12 };
+
   var COUNT = { min: 10, max: 500, default: 100 };
 
-  var api = { LEVELS: LEVELS, QUICK_DRILL: QUICK_DRILL, COUNT: COUNT, ALL_FORMULAS: ALL_FORMULAS };
+  var api = { LEVELS: LEVELS, QUICK_DRILL: QUICK_DRILL, ALL_LEVELS: ALL_LEVELS, COUNT: COUNT, ALL_FORMULAS: ALL_FORMULAS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AbacusConfig = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

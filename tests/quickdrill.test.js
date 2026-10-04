@@ -7,11 +7,12 @@ const pdf = require('../js/pdf.js');
 const { QUICK_DRILL } = require('../js/config.js');
 
 function checkSheet(sheet, digits, count) {
+  const [lo, hi] = Array.isArray(digits) ? digits : [digits, digits];
   assert.strictEqual(sheet.type, 'quick');
   assert.strictEqual(sheet.rows.length, count);
   const seen = new Set();
   for (const row of sheet.rows) {
-    assert.match(row.number, new RegExp(`^[1-9]\\d{${digits - 1}}$`), 'digits / no leading zero');
+    assert.match(row.number, new RegExp(`^[1-9]\\d{${lo - 1},${hi - 1}}$`), 'digits / no leading zero');
     assert.ok(!seen.has(row.number), 'repeated number ' + row.number);
     seen.add(row.number);
     assert.strictEqual(row.answers.length, sheet.multipliers.length);
@@ -21,14 +22,18 @@ function checkSheet(sheet, digits, count) {
   }
 }
 
-test('default Quick Drill: 8 digits, × 2 and × 5', () => {
-  assert.strictEqual(QUICK_DRILL.digits, 8);
+test('default Quick Drill: random 3-10 digit numbers, × 2 and × 5', () => {
+  assert.deepStrictEqual(QUICK_DRILL.digits, [3, 10]);
   assert.deepStrictEqual(QUICK_DRILL.multipliers, [2, 5]);
+  const lengths = new Set();
   for (let s = 0; s < 50; s++) {
     const sheet = gen.generateWorksheet('quick', 100);
     assert.deepStrictEqual(sheet.multipliers, [2, 5]);
-    checkSheet(sheet, 8, 100);
+    assert.strictEqual(sheet.digitLabel, '3-10');
+    checkSheet(sheet, [3, 10], 100);
+    sheet.rows.forEach((r) => lengths.add(r.number.length));
   }
+  assert.strictEqual(lengths.size, 8, 'every length from 3 to 10 shows up');
 });
 
 test('Quick Drill with 3 and 10 digits', () => {

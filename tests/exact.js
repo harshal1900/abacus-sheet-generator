@@ -105,7 +105,7 @@ function checkAnswer(q) {
 }
 
 function evalStack(q) {
-  if (q.type === 'mul') return mul(rat(q.lines[0]), rat(q.lines[1].slice(1)));
+  if (q.type === 'mul' || q.type === 'quick') return mul(rat(q.lines[0]), rat(q.lines[1].slice(1)));
   if (q.type === 'div') return div(rat(q.lines[0]), rat(q.lines[1].slice(1)));
   let total = [0n, 1n];
   for (const line of q.lines) {

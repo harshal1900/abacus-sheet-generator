@@ -12,8 +12,8 @@ Everything runs in the browser with plain JavaScript. There's no server, no sign
 
 - **Maximum randomness.** Each question picks its own operation, digits, number of rows and decimals, so no two sheets look alike. You never set operations, rows or digits yourself.
 - **Real abacus rules.** Add/subtract sums are worked out bead by bead on soroban rods. Each step is classed as **Direct**, **Small Friend** (±5), **Big Friend** (±10) or **Combination**, and a sum is only used if its level has taught every formula it needs. The running total never drops below zero.
-- **All Levels mode** mixes levels 1–8 on one sheet. Each card shows a small `L1`…`L8` tag.
-- **Quick Drill**: a teacher-style table with S.No. | Number | Quick-2 | Quick-5. Each row has one random 8-digit number to multiply by 2 and by 5. Tables have 6 rows, and several fit on a page. The header has Start Time, End Time and Act. Time (min / sec).
+- **All Levels mode** mixes levels 1–8 on one sheet, plus about 12% Quick Drill cards (a 3–10 digit number × 2 or × 5). Each card shows a small `L1`…`L8` or `QD` tag.
+- **Quick Drill**: a teacher-style table with S.No. | Number | Quick-2 | Quick-5. Each row has one random number, 3 to 10 digits long, to multiply by 2 and by 5. Tables have 6 rows, and several fit on a page. The header has Start Time, End Time and Act. Time (min / sec).
 - **Exact answers only.** Division always works out exactly or as "Q R r", fractions are simplified, and the tests recheck every answer with exact BigInt maths.
 - **No repeated questions** on a sheet.
 - **Print-friendly PDF.** A question is never split across pages, and the sheet never ends on a nearly empty page. Pale headers and dark lines stay clear in black and white.
@@ -32,7 +32,7 @@ Everything runs in the browser with plain JavaScript. There's no server, no sign
 | 6 | Intermediate | all | Decimal sums, 3×2, 4×1 and decimal ×, 4÷1, 3÷2 and decimal ÷, remainders, squares of 2-digit numbers |
 | 7 | Advanced | all | 3–5 digit and 2-decimal sums, negative-number sums, 3×3 and 4×2 ×, 4÷2 and 5÷2 ÷, decimal × and ÷, %, square roots, fraction of a number, squares, cubes, LCM, HCF |
 | 8 | Grand Master | all | 4–6 digit sums with 8–12 rows, negative sums, 4×3 and 5×2 ×, 6÷2 and 5÷3 ÷, decimal × and ÷, harder %, square and cube roots, fractions, BODMAS, squares of 3-digit and cubes of 2–3 digit numbers, LCM, HCF |
-| Quick Drill | Speed | – | One 8-digit number per row: write ×2 and ×5 |
+| Quick Drill | Speed | – | One 3–10 digit number per row: write ×2 and ×5 |
 
 ## Changing the rules
 
@@ -45,7 +45,7 @@ All rules live in **`js/config.js`**. The generator has no limits of its own.
 
 **Add a level:** add a new numbered entry (for example `9: { ... }`) with the same fields. Its tile, All Levels mode and the tests pick it up automatically.
 
-**Change Quick Drill:** edit `QUICK_DRILL`: `digits`, `multipliers` (`[2, 5]` gives Quick-2 and Quick-5) and `rowsPerTable`.
+**Change Quick Drill:** edit `QUICK_DRILL`: `digits` (a `[min, max]` range; `[8, 8]` for a fixed length), `multipliers` (`[2, 5]` gives Quick-2 and Quick-5) and `rowsPerTable`. `ALL_LEVELS.quickShare` sets how many All Levels questions are Quick Drill cards (`0` turns them off).
 
 **Add a question type:**
 1. Write a builder in `js/generator.js`. It takes `(rng, item, level)` and returns `{ kind: 'stack', lines, answer }` or `{ kind: 'inline', tokens, answer }`, or `null` if it couldn't make one. Keep every loop bounded.
@@ -81,5 +81,5 @@ scripts/make-sample.js  build a PDF from the command line
 ```
 npm test                                        # run all tests (Node 18+)
 node scripts/make-sample.js 8 100 out.pdf       # level 1-8 or "all", question count
-node scripts/make-sample.js quick 60 qd.pdf 10  # Quick Drill, optional digit count
+node scripts/make-sample.js quick 60 qd.pdf 10  # Quick Drill, optional fixed digit count
 ```
