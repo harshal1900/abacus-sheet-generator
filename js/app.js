@@ -1,9 +1,12 @@
 (function () {
   'use strict';
 
-  var MIN = 10, MAX = 500;
-  var LEVELS = AbacusGen.LEVELS;
-  var TINTS = ['', 'var(--l1)', 'var(--l2)', 'var(--l3)', 'var(--l4)', 'var(--l5)', 'var(--l6)', 'var(--l7)', 'var(--l8)'];
+  var CONFIG = AbacusConfig;
+  var MIN = CONFIG.COUNT.min, MAX = CONFIG.COUNT.max;
+  var LEVELS = CONFIG.LEVELS, QUICK = CONFIG.QUICK_DRILL;
+  var ORDER = ['all', 'quick'].concat(Object.keys(LEVELS).map(Number));
+
+  function rgb(c) { return 'rgb(' + c.join(',') + ')'; }
 
   var state = { level: 'all', count: 100 };
   var lastUrl = null;
@@ -15,7 +18,7 @@
   try {
     var saved = JSON.parse(localStorage.getItem('abacus-sheet') || 'null');
     if (saved) {
-      if (saved.level === 'all' || LEVELS[saved.level]) state.level = saved.level;
+      if (ORDER.indexOf(saved.level) >= 0) state.level = saved.level;
       if (saved.count) state.count = clamp(saved.count);
     }
   } catch (e) { /* storage unavailable */ }
@@ -26,7 +29,7 @@
 
   function clamp(n) {
     n = Math.round(Number(n));
-    if (!isFinite(n)) return 100;
+    if (!isFinite(n)) return CONFIG.COUNT.default;
     return Math.max(MIN, Math.min(MAX, n));
   }
 
@@ -35,7 +38,7 @@
   function tile(value, title, stage, about, dot) {
     var b = document.createElement('button');
     b.type = 'button';
-    b.className = 'level' + (value === 'all' ? ' all' : '');
+    b.className = 'level' + (typeof value === 'string' ? ' wide ' + value : '');
     b.setAttribute('role', 'radio');
     b.dataset.level = value;
     b.innerHTML =
@@ -47,9 +50,12 @@
   }
 
   levelsBox.appendChild(tile('all', 'All Levels', 'Mix it up', 'A surprise mix of every level, from easy sums to roots and fractions', ''));
-  for (var i = 1; i <= 8; i++) {
-    levelsBox.appendChild(tile(i, LEVELS[i].name, LEVELS[i].stage, LEVELS[i].about, TINTS[i]));
-  }
+  levelsBox.appendChild(tile('quick', QUICK.name, QUICK.stage,
+    QUICK.digits + '-digit numbers × ' + QUICK.multipliers.join(' and × ') + ', as fast as you can', rgb(QUICK.tint)));
+  Object.keys(LEVELS).forEach(function (k) {
+    var L = LEVELS[k];
+    levelsBox.appendChild(tile(Number(k), L.name, L.stage, L.about, rgb(L.tint)));
+  });
 
   function setLevel(v) {
     state.level = v;
@@ -59,6 +65,7 @@
       tiles[j].setAttribute('aria-checked', on ? 'true' : 'false');
       tiles[j].tabIndex = on ? 0 : -1;
     }
+    el('step2').lastChild.textContent = v === 'quick' ? ' How many numbers?' : ' How many questions?';
     save();
   }
 
@@ -67,9 +74,8 @@
     var keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
     if (!keys[e.key]) return;
     e.preventDefault();
-    var order = ['all', 1, 2, 3, 4, 5, 6, 7, 8];
-    var idx = order.indexOf(state.level);
-    var next = order[(idx + keys[e.key] + order.length) % order.length];
+    var idx = ORDER.indexOf(state.level);
+    var next = ORDER[(idx + keys[e.key] + ORDER.length) % ORDER.length];
     setLevel(next);
     levelsBox.querySelector('[data-level="' + next + '"]').focus();
   });
@@ -107,40 +113,65 @@
 
   // ---------- generate ----------
 
+  function levelTitle(v) {
+    if (v === 'all') return 'All levels';
+    if (v === 'quick') return QUICK.name;
+    return LEVELS[v].name;
+  }
+
+  var busy = false;
+
   function generate() {
+    if (busy) return;
     setCount(countInput.value);
     var btn = el('generate');
     var err = el('error');
     err.hidden = true;
+    busy = true;
     btn.disabled = true;
-    try {
-      var sheet = AbacusGen.generateWorksheet(state.level, state.count);
-      var doc = AbacusPdf.buildPdf(window.jspdf.jsPDF, sheet, LEVELS);
-      var pages = doc.internal.getNumberOfPages();
-      var blob = doc.output('blob');
-      if (lastUrl) URL.revokeObjectURL(lastUrl);
-      lastUrl = URL.createObjectURL(blob);
+    btn.classList.add('busy');
+    btn.querySelector('span').textContent = ' Making your worksheet...';
+    // Let the browser paint the "making" state before the work starts.
+    setTimeout(function () {
+      try {
+        build();
+      } catch (e) {
+        err.textContent = 'Sorry, something went wrong making the worksheet. Please try again.';
+        err.hidden = false;
+        if (window.console) console.error(e);
+      } finally {
+        busy = false;
+        btn.disabled = false;
+        btn.classList.remove('busy');
+        btn.querySelector('span').textContent = ' Generate Worksheet';
+      }
+    }, 30);
+  }
 
-      var levelName = state.level === 'all' ? 'all-levels' : 'level-' + state.level;
-      var fileName = 'abacus-' + levelName + '-' + sheet.count + 'q-' + sheet.id + '.pdf';
+  function build() {
+    var sheet = AbacusGen.generateWorksheet(state.level, state.count);
+    var doc = AbacusPdf.buildPdf(window.jspdf.jsPDF, sheet, LEVELS);
+    var pages = doc.internal.getNumberOfPages();
+    var blob = doc.output('blob');
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = URL.createObjectURL(blob);
 
-      el('openBtn').href = lastUrl;
-      var dl = el('downloadBtn');
-      dl.href = lastUrl;
-      dl.download = fileName;
-      el('resultInfo').textContent =
-        (state.level === 'all' ? 'All levels' : LEVELS[state.level].name) + ' · ' +
-        sheet.count + ' questions · ' + pages + ' pages · Sheet ID ' + sheet.id;
-      el('result').hidden = false;
-      dl.click();
-      el('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    } catch (e) {
-      err.textContent = 'Sorry, something went wrong making the worksheet. Please try again.';
-      err.hidden = false;
-      if (window.console) console.error(e);
-    } finally {
-      btn.disabled = false;
-    }
+    var name = state.level === 'all' ? 'all-levels'
+      : state.level === 'quick' ? 'quick-drill' : 'level-' + state.level;
+    var fileName = 'abacus-' + name + '-' + sheet.count + '-' + sheet.id + '.pdf';
+
+    el('openBtn').href = lastUrl;
+    var dl = el('downloadBtn');
+    dl.href = lastUrl;
+    dl.download = fileName;
+    el('resultInfo').textContent = levelTitle(state.level) + ' · ' + sheet.count +
+      (state.level === 'quick' ? ' numbers' : ' questions') + ' · ' + pages + ' pages · Sheet ID ' + sheet.id;
+    var warn = el('warning');
+    warn.textContent = sheet.warning || '';
+    warn.hidden = !sheet.warning;
+    el('result').hidden = false;
+    dl.click();
+    el('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   el('generate').addEventListener('click', generate);

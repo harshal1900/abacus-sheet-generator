@@ -156,7 +156,7 @@ body {
   font-size: 14px; font-weight: 800;
 }
 
-.level.all { grid-column: 1 / -1; min-height: 0; }
+.level.wide { grid-column: span 2; min-height: 0; }
 .level.all .dot {
   background: conic-gradient(var(--l1), var(--l2), var(--l3), var(--l4), var(--l5), var(--l6), var(--l7), var(--l8), var(--l1));
 }
@@ -248,7 +248,12 @@ body {
 .go:hover { filter: brightness(1.06); }
 .go:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18); }
 .go:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
-.go[disabled] { opacity: 0.7; cursor: progress; }
+.go[disabled] { opacity: 0.8; cursor: progress; }
+.go.busy svg { animation: pulse 0.9s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .go.busy svg { animation: none; } }
+
+.result-text .warning { color: #a85b00; font-weight: 700; }
 
 /* ---------- result ---------- */
 
@@ -304,6 +309,7 @@ body {
   .levels { grid-template-columns: 1fr 1fr; }
   .level { min-height: 0; padding: 10px; }
   .level .about { display: none; }
+  .level.wide { grid-column: span 1; }
   .round { width: 48px; height: 48px; font-size: 26px; }
   #count { width: 120px; font-size: 36px; }
   .go { font-size: 20px; padding: 18px; }

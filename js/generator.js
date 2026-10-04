@@ -522,6 +522,57 @@
     mixed: buildMixed
   };
 
+
+  // ---------- Quick Drill ----------
+
+  // Exact "digit string × small whole number", any length (no float limits).
+  function mulString(str, m) {
+    var out = '', carry = 0;
+    for (var i = str.length - 1; i >= 0; i--) {
+      var p = (str.charCodeAt(i) - 48) * m + carry;
+      out = (p % 10) + out;
+      carry = Math.floor(p / 10);
+    }
+    return carry ? carry + out : out;
+  }
+
+  /*
+   * Quick Drill: one random number per row (no leading zero); the child
+   * writes number × each multiplier.
+   *   opts: { digits, multipliers } override QUICK_DRILL in config.js
+   */
+  function generateQuickDrill(count, sheetId, opts) {
+    opts = opts || {};
+    var Q = CONFIG.QUICK_DRILL;
+    var digits = Math.max(1, Math.min(18, Math.round(opts.digits || Q.digits)));
+    var multipliers = opts.multipliers || Q.multipliers;
+    var id = sheetId || newSheetId();
+    count = clampCount(count);
+    var rng = new Rng(seedFromId(id + ':quick:' + count + ':' + digits + ':' + multipliers.join(',')));
+    var rows = [], seen = {};
+    var maxAttempts = count * 40 + 200;
+    for (var attempts = 0; rows.length < count && attempts < maxAttempts; attempts++) {
+      var n = String(rng.int(1, 9));
+      for (var i = 1; i < digits; i++) n += rng.int(0, 9);
+      if (seen[n]) continue;
+      seen[n] = true;
+      rows.push({
+        number: n,
+        answers: multipliers.map(function (m) { return mulString(n, m); })
+      });
+    }
+    var warning = null;
+    if (rows.length < count) {
+      warning = 'Only ' + rows.length + ' different ' + digits + '-digit numbers exist, ' +
+        'so the sheet has ' + rows.length + ' rows instead of ' + count + '.';
+    }
+    return {
+      type: 'quick', id: id, level: 'quick', count: rows.length,
+      digits: digits, multipliers: multipliers.slice(), rows: rows,
+      rowsPerTable: Q.rowsPerTable, warning: warning
+    };
+  }
+
   function signature(q) {
     var body = q.kind === 'stack' ? q.lines.join('|') : JSON.stringify(q.tokens);
     return q.kind + '#' + body;
@@ -535,7 +586,7 @@
 
   /*
    * Build a worksheet.
-   *   level:   1..8 or 'all'
+   *   level:   1..8, 'all', or 'quick' (Quick Drill, see generateQuickDrill)
    *   count:   number of questions (clamped to COUNT.min..COUNT.max)
    *   sheetId: optional; random when omitted
    *   opts:    { levels } to use other level rules (tests)
@@ -544,6 +595,7 @@
    */
   function generateWorksheet(level, count, sheetId, opts) {
     opts = opts || {};
+    if (level === 'quick') return generateQuickDrill(count, sheetId, opts);
     var levels = opts.levels || CONFIG.LEVELS;
     var id = sheetId || newSheetId();
     count = clampCount(count);
@@ -575,18 +627,19 @@
       warning = 'This level only had ' + questions.length + ' different questions to give, ' +
         'so the sheet has ' + questions.length + ' instead of ' + count + '.';
     }
-    return { id: id, level: level, count: questions.length, questions: questions, warning: warning };
+    return { type: 'levels', id: id, level: level, count: questions.length, questions: questions, warning: warning };
   }
 
   var api = {
     LEVELS: CONFIG.LEVELS,
     CONFIG: CONFIG,
     generateWorksheet: generateWorksheet,
+    generateQuickDrill: generateQuickDrill,
     newSheetId: newSheetId,
     clampCount: clampCount,
     analyseSum: analyseSum,
     // exposed for tests
-    _internal: { Rng: Rng, fixed: fixed, trimmed: trimmed, fracAnswer: fracAnswer, gcd: gcd, BUILDERS: BUILDERS, digitCount: digitCount }
+    _internal: { Rng: Rng, fixed: fixed, trimmed: trimmed, fracAnswer: fracAnswer, gcd: gcd, BUILDERS: BUILDERS, digitCount: digitCount, mulString: mulString }
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
