@@ -161,3 +161,20 @@ test('decimal add/sub, multiply and divide appear at every level that teaches de
     assert.ok(!qs.some((q) => (q.lines || []).some((l) => l.includes('.'))), 'no decimals at ' + level);
   }
 });
+
+test('PDF pages: no near-empty last page, questions numbered in layout order', () => {
+  for (const level of [1, 4, 8, 'all', 'quick']) {
+    for (const count of [10, 37, 100, 250, 500]) {
+      const sheet = gen.generateWorksheet(level, count);
+      pdf.buildPdf(jsPDF, sheet, gen.LEVELS);
+      const fill = sheet.pageFill;
+      assert.ok(fill.every((f) => f <= 1.0001), 'nothing runs off a page');
+      if (fill.length > 1) {
+        assert.ok(fill[fill.length - 1] >= 0.35, `last page only ${fill[fill.length - 1]} full (${level}, ${count})`);
+      }
+      if (sheet.ordered) {
+        assert.deepStrictEqual(sheet.ordered.map((q) => q.number), sheet.ordered.map((_, i) => i + 1));
+      }
+    }
+  }
+});

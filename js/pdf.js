@@ -18,12 +18,9 @@
   var HEAD_H = 14, ANSWER_H = 19, PAD = 5, LINE_H = 11.6;
   var FONT = 'helvetica';
 
-  // Soft colour per level for the card headers (still clear in black & white).
-  var LEVEL_TINT = {
-    1: [253, 226, 228], 2: [255, 232, 204], 3: [255, 243, 191], 4: [211, 249, 216],
-    5: [197, 246, 250], 6: [208, 235, 255], 7: [229, 219, 255], 8: [243, 217, 250]
-  };
-  var INK = [33, 37, 41], MUTED = [110, 118, 129], BORDER = [150, 160, 172];
+  // Card headers use each level's `tint` from config.js: pale enough to
+  // print as light grey in black & white, with dark text on top.
+  var INK = [20, 23, 28], MUTED = [92, 99, 110], BORDER = [105, 113, 125];
   var ACCENT = [76, 110, 245];
 
   // ---------- token measuring / drawing ----------
@@ -296,11 +293,13 @@
 
   // ---------- question pages ----------
 
+  var tintOf = function (q) { return [235, 237, 240]; };
+
   function drawCard(doc, q, x, y, bodyH, showLevel) {
     var h = HEAD_H + bodyH + ANSWER_H;
     doc.setDrawColor.apply(doc, BORDER);
     doc.setLineWidth(0.7);
-    doc.setFillColor.apply(doc, LEVEL_TINT[q.level]);
+    doc.setFillColor.apply(doc, tintOf(q));
     doc.rect(x, y, CARD_W, HEAD_H, 'F');
     doc.rect(x, y, CARD_W, h);
     doc.line(x, y + HEAD_H, x + CARD_W, y + HEAD_H);
@@ -380,6 +379,7 @@
     var showLevel = sheet.level === 'all';
     var top = drawFirstHeader(doc, sheet, LEVELS);
     var pages = layoutPages(packRows(sheet.questions), rowHeight, top, OTHER_TOP, GAP_Y, true);
+    sheet.pageFill = pageFill(pages, rowHeight, top, GAP_Y);
     var n = 1;
     sheet.ordered = [];
     pages.forEach(function (page, p) {
@@ -411,40 +411,44 @@
     doc.setTextColor.apply(doc, INK);
   }
 
+  /*
+   * Answer key: 12 answers per row, so each key row holds two worksheet rows
+   * (Q1-6 | Q7-12) and every answer sits in the same column as its question.
+   */
   function drawAnswerKey(doc, sheet, LEVELS) {
-    var KCOLS = 10, KGAP = 4;
-    var cw = (CONTENT_W - KGAP * (KCOLS - 1)) / KCOLS;
-    var kHead = 11;
-
-    doc.addPage();
-    var y = drawSmallHeader(doc, sheet, LEVELS, 'Answer Key');
+    var KCOLS = 12, KGAP = 3, MID = 12, kHead = 11;
+    var cw = (CONTENT_W - KGAP * (KCOLS - 2) - MID) / KCOLS;
     var qs = sheet.ordered;
-    for (var r = 0; r < qs.length; r += KCOLS) {
-      var row = qs.slice(r, r + KCOLS);
-      var bodyH = row.some(function (q) { return hasFrac(q.answer); }) ? 26 : 18;
-      if (y + kHead + bodyH > BOTTOM) {
-        doc.addPage();
-        y = drawSmallHeader(doc, sheet, LEVELS, 'Answer Key (continued)');
-      }
-      row.forEach(function (q, i) {
-        var x = MARGIN + i * (cw + KGAP);
-        doc.setDrawColor.apply(doc, BORDER);
-        doc.setLineWidth(0.6);
-        doc.setFillColor.apply(doc, LEVEL_TINT[q.level]);
-        doc.rect(x, y, cw, kHead, 'F');
-        doc.rect(x, y, cw, kHead + bodyH);
-        doc.line(x, y + kHead, x + cw, y + kHead);
-        doc.setFont(FONT, 'bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor.apply(doc, INK);
-        doc.text(String(q.number), x + cw / 2, y + 8, { align: 'center' });
-        var fs = fitTokens(doc, q.answer, cw - 5, 9.5, 5.5);
-        drawTokens(doc, q.answer, x + cw / 2, y + kHead + bodyH / 2, fs, true);
-      });
-      y += kHead + bodyH + 7;
-    }
-  }
+    var rows = [];
+    for (var r = 0; r < qs.length; r += KCOLS) rows.push(qs.slice(r, r + KCOLS));
+    var bodyOf = function (row) { return row.some(function (q) { return hasFrac(q.answer); }) ? 25 : 17; };
+    var heightOf = function (row) { return kHead + bodyOf(row); };
 
+    var pages = layoutPages(rows, heightOf, OTHER_TOP, OTHER_TOP, 6, false);
+    pages.forEach(function (page, p) {
+      doc.addPage();
+      var y = drawSmallHeader(doc, sheet, LEVELS, p ? 'Answer Key (continued)' : 'Answer Key');
+      page.forEach(function (row) {
+        var bodyH = bodyOf(row);
+        row.forEach(function (q, i) {
+          var x = MARGIN + i * (cw + KGAP) + (i >= KCOLS / 2 ? MID - KGAP : 0);
+          doc.setDrawColor.apply(doc, BORDER);
+          doc.setLineWidth(0.6);
+          doc.setFillColor.apply(doc, tintOf(q));
+          doc.rect(x, y, cw, kHead, 'F');
+          doc.rect(x, y, cw, kHead + bodyH);
+          doc.line(x, y + kHead, x + cw, y + kHead);
+          doc.setFont(FONT, 'bold');
+          doc.setFontSize(7.5);
+          doc.setTextColor.apply(doc, INK);
+          doc.text(String(q.number), x + cw / 2, y + 8, { align: 'center' });
+          var fs = fitTokens(doc, q.answer, cw - 4, 9.5, 5);
+          drawTokens(doc, q.answer, x + cw / 2, y + kHead + bodyH / 2, fs, true);
+        });
+        y += heightOf(row) + 6;
+      });
+    });
+  }
 
   // ---------- Quick Drill ----------
 
@@ -521,6 +525,7 @@
     };
     var top = drawFirstHeader(doc, sheet, LEVELS);
     var pages = layoutPages(tables, heightOf, top, OTHER_TOP, QD_GAP, false);
+    sheet.pageFill = pageFill(pages, heightOf, top, QD_GAP);
     pages.forEach(function (page, p) {
       var y = top;
       if (p > 0) {
@@ -643,6 +648,15 @@
     return pages;
   }
 
+  // How full each page is (0..1), for tests and tuning.
+  function pageFill(pages, heightOf, firstTop, gap) {
+    return pages.map(function (page, p) {
+      var used = 0;
+      page.forEach(function (it, k) { used += heightOf(it) + (k ? gap : 0); });
+      return used / (BOTTOM - (p ? OTHER_TOP : firstTop));
+    });
+  }
+
   /*
    * Build the PDF. Returns the jsPDF document.
    *   jsPDF: the jsPDF constructor
@@ -650,6 +664,7 @@
    */
   function buildPdf(jsPDF, sheet, LEVELS) {
     var doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    tintOf = function (q) { return (LEVELS[q.level] && LEVELS[q.level].tint) || [235, 237, 240]; };
     doc.setProperties({ title: 'Abacus Practice Worksheet ' + sheet.id, creator: 'Abacus Sheet Generator' });
     if (sheet.type === 'quick') {
       drawQuickPages(doc, sheet, LEVELS);
