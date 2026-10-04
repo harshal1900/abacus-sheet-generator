@@ -7,84 +7,7 @@ const pdf = require('../js/pdf.js');
 
 const LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 'all'];
 
-// Exact rational arithmetic on [numerator, denominator] using BigInt so the
-// check does not share any float code with the generator.
-function rat(str) {
-  if (str.includes('/')) {
-    const [n, d] = str.split('/');
-    return [BigInt(n), BigInt(d)];
-  }
-  const neg = str.startsWith('-');
-  const s = neg ? str.slice(1) : str;
-  const [w, f = ''] = s.split('.');
-  const v = BigInt(w + f) * (neg ? -1n : 1n);
-  return [v, 10n ** BigInt(f.length)];
-}
-const add = (a, b) => [a[0] * b[1] + b[0] * a[1], a[1] * b[1]];
-const sub = (a, b) => add(a, [-b[0], b[1]]);
-const mul = (a, b) => [a[0] * b[0], a[1] * b[1]];
-const div = (a, b) => [a[0] * b[1], a[1] * b[0]];
-const eq = (a, b) => a[0] * b[1] === b[0] * a[1];
-
-function tokenValue(t) {
-  if (t.t === 'num') return rat(t.v.replace('%', ''));
-  if (t.t === 'frac') return [BigInt(t.n), BigInt(t.d)];
-  throw new Error('not a value token: ' + t.t);
-}
-
-function answerValue(tokens) {
-  // A mixed number is [whole, frac].
-  return tokens.map(tokenValue).reduce(add, [0n, 1n]);
-}
-
-// Evaluate an inline expression with normal precedence (× ÷ before + -).
-function evalInline(tokens) {
-  const root = tokens.find((t) => t.t === 'root');
-  if (root) {
-    const v = Number(root.v);
-    const k = root.index === '3' ? 3 : 2;
-    const r = Math.round(Math.pow(v, 1 / k));
-    assert.strictEqual(r ** k, v, 'root must be perfect: ' + root.v);
-    return [BigInt(r), 1n];
-  }
-  const ofIdx = tokens.findIndex((t) => t.t === 'text' && t.v === 'of');
-  if (ofIdx >= 0) {
-    const left = tokens[0];
-    const base = tokenValue(tokens[ofIdx + 1]);
-    const part = left.t === 'num' && left.v.endsWith('%')
-      ? div(tokenValue(left), [100n, 1n]) : tokenValue(left);
-    return mul(part, base);
-  }
-  // Shunting-yard for + - × ÷ and parentheses.
-  const prec = { '+': 1, '-': 1, '×': 2, '÷': 2 };
-  const out = [], ops = [];
-  const apply = () => {
-    const o = ops.pop(), b = out.pop(), a = out.pop();
-    out.push({ '+': add, '-': sub, '×': mul, '÷': div }[o](a, b));
-  };
-  for (const t of tokens) {
-    if (t.t === 'num' || t.t === 'frac') out.push(tokenValue(t));
-    else if (t.v === '(') ops.push('(');
-    else if (t.v === ')') { while (ops[ops.length - 1] !== '(') apply(); ops.pop(); }
-    else {
-      while (ops.length && ops[ops.length - 1] !== '(' && prec[ops[ops.length - 1]] >= prec[t.v]) apply();
-      ops.push(t.v);
-    }
-  }
-  while (ops.length) apply();
-  return out[0];
-}
-
-function evalStack(q) {
-  if (q.op === 'mul') return mul(rat(q.lines[0]), rat(q.lines[1].slice(1)));
-  if (q.op === 'div') return div(rat(q.lines[0]), rat(q.lines[1].slice(1)));
-  let total = [0n, 1n];
-  for (const line of q.lines) {
-    total = add(total, rat(line));
-    assert.ok(total[0] * total[1] > 0n, 'running total must stay above zero: ' + q.lines.join(','));
-  }
-  return total;
-}
+const { checkAnswer } = require('./exact.js');
 
 for (const level of LEVELS) {
   test(`level ${level}: answers are correct and questions are unique`, () => {
@@ -97,34 +20,33 @@ for (const level of LEVELS) {
         assert.ok(!seen.has(key), 'duplicate question ' + key);
         seen.add(key);
         if (level !== 'all') assert.strictEqual(q.level, level);
-        const expected = q.kind === 'stack' ? evalStack(q) : evalInline(q.tokens);
-        assert.ok(eq(expected, answerValue(q.answer)),
-          `wrong answer for ${key}: got ${JSON.stringify(q.answer)}`);
+        checkAnswer(q);
       }
     }
   });
 }
 
-test('level 1 sums stay within 1-9 bead range or simple numbers', () => {
+test('level 1 sums stay within the 1-9 beads of one rod', () => {
   const sheet = gen.generateWorksheet(1, 300);
   for (const q of sheet.questions) {
     assert.strictEqual(q.kind, 'stack');
-    for (const l of q.lines) assert.ok(Math.abs(Number(l)) < 100);
+    let total = 0;
+    for (const l of q.lines) { total += Number(l); assert.ok(total >= 1 && total <= 9); }
   }
 });
 
 test('beginner levels only add and subtract', () => {
   for (const level of [1, 2, 3]) {
     const sheet = gen.generateWorksheet(level, 200);
-    assert.ok(sheet.questions.every((q) => q.op === 'addsub'));
+    assert.ok(sheet.questions.every((q) => q.type === 'addsub'));
   }
 });
 
 test('questions vary in operation, digits and number of rows', () => {
   const sheet = gen.generateWorksheet(5, 200);
-  const ops = new Set(sheet.questions.map((q) => q.op));
+  const ops = new Set(sheet.questions.map((q) => q.type));
   assert.ok(ops.size >= 3, 'expected several operations');
-  const sums = sheet.questions.filter((q) => q.op === 'addsub');
+  const sums = sheet.questions.filter((q) => q.type === 'addsub');
   assert.ok(new Set(sums.map((q) => q.lines.length)).size >= 3, 'expected varied row counts');
   const lengths = new Set(sums.flatMap((q) => q.lines.map((l) => l.replace('-', '').length)));
   assert.ok(lengths.size >= 2, 'expected varied digit lengths');
@@ -161,8 +83,98 @@ test('decimal numbers never end in a trailing zero', () => {
   for (const level of [6, 7, 8]) {
     const sheet = gen.generateWorksheet(level, 300);
     for (const q of sheet.questions) {
-      if (q.kind !== 'stack' || q.op === 'addsub') continue;
+      if (q.kind !== 'stack' || q.type === 'addsub') continue;
       for (const l of q.lines) assert.ok(!/\.\d*0$/.test(l), 'trailing zero in ' + l);
+    }
+  }
+});
+
+// ---------- new question types ----------
+
+function questionsOfType(type, level, n = 400) {
+  const qs = [];
+  for (let s = 0; qs.length < n && s < 200; s++) {
+    for (const q of gen.generateWorksheet(level, 500, 'T' + type + s).questions) {
+      if (q.type === type) qs.push(q);
+    }
+  }
+  assert.ok(qs.length > 0, 'no ' + type + ' questions at level ' + level);
+  return qs;
+}
+
+test('squares and cubes have exact answers', () => {
+  for (const [type, level] of [['square', 6], ['square', 8], ['cube', 7], ['cube', 8]]) {
+    for (const q of questionsOfType(type, level)) {
+      checkAnswer(q);
+      assert.ok(Number(q.tokens[0].v) % 10 !== 0, 'no trivial base like 40');
+    }
+  }
+});
+
+test('LCM and HCF are correct and not trivial', () => {
+  for (const q of questionsOfType('lcm', 8)) {
+    checkAnswer(q);
+    const args = q.tokens[0].args.map(Number);
+    const product = args.reduce((a, b) => a * b);
+    assert.ok(Number(q.answer[0].v) < product, 'LCM should not just be the product');
+  }
+  for (const q of questionsOfType('hcf', 7)) {
+    checkAnswer(q);
+    assert.ok(Number(q.answer[0].v) > 1, 'HCF should be more than 1');
+  }
+});
+
+test('negative-number sums only appear at levels 7-8 and go below zero', () => {
+  for (let level = 1; level <= 6; level++) {
+    assert.ok(!gen.generateWorksheet(level, 500).questions.some((q) => q.type === 'negsum'));
+  }
+  for (const q of questionsOfType('negsum', 8)) {
+    checkAnswer(q);
+    let total = 0, below = false;
+    for (const l of q.lines) { total += Number(l); if (total < 0) below = true; }
+    assert.ok(below, 'some subtotal must be negative: ' + q.lines);
+  }
+});
+
+test('division with remainder starts at level 5 and is always "Q R r"', () => {
+  for (let level = 1; level <= 4; level++) {
+    assert.ok(!gen.generateWorksheet(level, 500).questions.some((q) => q.type === 'divrem'));
+  }
+  for (const level of [5, 6, 7, 8]) {
+    for (const q of questionsOfType('divrem', level)) {
+      checkAnswer(q);
+      assert.strictEqual(q.answerHint, 'R');
+    }
+  }
+});
+
+test('decimal add/sub, multiply and divide appear at every level that teaches decimals', () => {
+  for (const level of [6, 7, 8]) {
+    const qs = gen.generateWorksheet(level, 500).questions;
+    const dec = (q) => (q.lines || []).some((l) => l.includes('.'));
+    assert.ok(qs.some((q) => q.type === 'addsub' && dec(q)), 'decimal sums at ' + level);
+    assert.ok(qs.some((q) => q.type === 'mul' && dec(q)), 'decimal × at ' + level);
+    assert.ok(qs.some((q) => q.type === 'div' && dec(q)), 'decimal ÷ at ' + level);
+  }
+  for (const level of [1, 2, 3, 4, 5]) {
+    const qs = gen.generateWorksheet(level, 300).questions;
+    assert.ok(!qs.some((q) => (q.lines || []).some((l) => l.includes('.'))), 'no decimals at ' + level);
+  }
+});
+
+test('PDF pages: no near-empty last page, questions numbered in layout order', () => {
+  for (const level of [1, 4, 8, 'all', 'quick']) {
+    for (const count of [10, 37, 100, 250, 500]) {
+      const sheet = gen.generateWorksheet(level, count);
+      pdf.buildPdf(jsPDF, sheet, gen.LEVELS);
+      const fill = sheet.pageFill;
+      assert.ok(fill.every((f) => f <= 1.0001), 'nothing runs off a page');
+      if (fill.length > 1) {
+        assert.ok(fill[fill.length - 1] >= 0.35, `last page only ${fill[fill.length - 1]} full (${level}, ${count})`);
+      }
+      if (sheet.ordered) {
+        assert.deepStrictEqual(sheet.ordered.map((q) => q.number), sheet.ordered.map((_, i) => i + 1));
+      }
     }
   }
 });

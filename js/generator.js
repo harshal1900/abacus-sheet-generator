@@ -3,16 +3,21 @@
  *
  * Pure JavaScript, no network or LLM needed. Every question is built from a
  * seeded random number generator, so a Sheet ID always reproduces the same
- * worksheet.
+ * worksheet. All level rules come from config.js.
  *
  * A question looks like one of:
  *   { kind: 'stack',  lines: ['345', '-120', '78'], answer: [...tokens] }
  *   { kind: 'inline', tokens: [...tokens],           answer: [...tokens] }
+ * plus: type (mix item type), level, spec (index of the mix item used).
  * Tokens are { t: 'num' | 'text' | 'op', v } | { t: 'frac', n, d }
- *          | { t: 'root', v, index }.
+ *          | { t: 'root', v, index } | { t: 'pow', v, e }
+ *          | { t: 'fn', v: 'LCM' | 'HCF', args: [...] }.
  */
 (function (root) {
   'use strict';
+
+  var CONFIG = (typeof module !== 'undefined' && module.exports)
+    ? require('./config.js') : root.AbacusConfig;
 
   // ---------- random helpers ----------
 
@@ -55,15 +60,16 @@
       if (digits <= 1) return this.int(1, 9);
       return this.int(Math.pow(10, digits - 1), Math.pow(10, digits) - 1);
     };
-    this.weighted = function (items) {
+    // Index of an item, chosen by its `weight`.
+    this.weightedIndex = function (items) {
       var total = 0, i;
-      for (i = 0; i < items.length; i++) total += items[i][0];
+      for (i = 0; i < items.length; i++) total += items[i].weight;
       var r = next() * total;
       for (i = 0; i < items.length; i++) {
-        r -= items[i][0];
-        if (r < 0) return items[i][1];
+        r -= items[i].weight;
+        if (r < 0) return i;
       }
-      return items[items.length - 1][1];
+      return items.length - 1;
     };
   }
 
@@ -95,6 +101,8 @@
     return a;
   }
 
+  function digitCount(n) { return String(Math.abs(n)).length; }
+
   function num(v) { return { t: 'num', v: String(v) }; }
   function op(v) { return { t: 'op', v: v }; }
   function text(v) { return { t: 'text', v: v }; }
@@ -110,83 +118,187 @@
     return [frac(n, d)];
   }
 
-  // ---------- question builders ----------
+  // ---------- abacus (soroban) rod model ----------
+  //
+  // Each rod holds 0-9: one heaven bead (5) and four earth beads (1 each).
+  // Numbers are added left to right, rod by rod, the way a child moves the
+  // beads. Each digit move is one of:
+  //   direct - the beads needed are free to move
+  //   small  - small friend: +a = +5 -(5-a)   /  -a = -5 +(5-a)
+  //   big    - big friend:   +a = -(10-a) +10 /  -a = +(10-a) -10
+  //   combo  - big friend whose first step itself needs a small friend
 
-  /*
-   * Vertical add/subtract sum, the classic abacus "list".
-   * opts: rows [min,max], digits [min,max], sub (chance of a minus row),
-   *       dp (decimal places), maxTotal (keep running total <= this),
-   *       intDigits [min,max] for decimal numbers.
-   */
-  function columnSum(rng, opts) {
-    var rows = rng.int(opts.rows[0], opts.rows[1]);
-    var dp = opts.dp || 0;
-    var scale = POW10[dp];
-    var maxTotal = opts.maxTotal ? opts.maxTotal * scale : Infinity;
-    var values = [];
-    var total = 0;
-
-    function randomValue() {
-      var d = rng.int(opts.digits[0], opts.digits[1]);
-      if (!dp) return rng.digits(d);
-      // d integer digits plus dp decimal places; last decimal non-zero keeps
-      // the decimal part meaningful.
-      var whole = d === 0 ? 0 : rng.digits(d);
-      var part = rng.int(1, scale - 1);
-      return whole * scale + part;
-    }
-
-    for (var i = 0; i < rows; i++) {
-      var v = 0, ok = false;
-      for (var tries = 0; !ok && tries < 60; tries++) {
-        v = randomValue();
-        if (i > 0 && rng.chance(opts.sub || 0)) v = -v;
-        // The running total must stay above zero (and under maxTotal), just
-        // like beads on a real abacus.
-        ok = total + v > 0 && total + v <= maxTotal;
-      }
-      if (!ok) v = total + 1 <= maxTotal ? 1 : -1;
-      values.push(v);
-      total += v;
-    }
-
-    return {
-      kind: 'stack',
-      op: 'addsub',
-      lines: values.map(function (v) { return fixed(v, dp); }),
-      answer: [num(fixed(total, dp))],
-      value: total / scale
-    };
+  function canAddDirect(d, a) {
+    var upper = d >= 5, lower = d % 5;
+    if (a >= 5) return !upper && lower + (a - 5) <= 4;
+    return lower + a <= 4;
   }
 
-  function multiply(rng, aDigits, bDigits, opts) {
-    opts = opts || {};
-    var adp = opts.adp || 0, bdp = opts.bdp || 0;
-    var a, b;
-    do {
-      a = rng.digits(aDigits + adp);
-      b = rng.digits(bDigits + bdp);
-    } while (b < 2 || a % 10 === 0 || b % 10 === 0);
-    var dp = adp + bdp;
-    return {
-      kind: 'stack',
-      op: 'mul',
-      lines: [fixed(a, adp), '×' + fixed(b, bdp)],
-      answer: [num(trimmed(a * b, dp))],
-      value: (a * b) / POW10[dp]
-    };
+  function canSubDirect(d, a) {
+    var upper = d >= 5, lower = d % 5;
+    if (a >= 5) return upper && lower >= a - 5;
+    return lower >= a;
+  }
+
+  // rods[0] is the units rod. Returns false if the move is impossible.
+  function moveDigit(rods, pos, a, minus, used) {
+    if (a === 0) return true;
+    if (pos >= rods.length) return false;
+    var d = rods[pos];
+    if (!minus) {
+      if (canAddDirect(d, a)) used.direct = true;
+      else if (d + a <= 9) used.small = true;
+      else {
+        if (canSubDirect(d, 10 - a)) used.big = true; else used.combo = true;
+        rods[pos] = d + a - 10;
+        return moveDigit(rods, pos + 1, 1, false, used);
+      }
+      rods[pos] = d + a;
+      return true;
+    }
+    if (canSubDirect(d, a)) used.direct = true;
+    else if (d - a >= 0) used.small = true;
+    else {
+      if (canAddDirect(d, 10 - a)) used.big = true; else used.combo = true;
+      rods[pos] = d - a + 10;
+      return moveDigit(rods, pos + 1, 1, true, used);
+    }
+    rods[pos] = d - a;
+    return true;
+  }
+
+  // Add (or take away) a non-negative integer, highest rod first.
+  function moveNumber(rods, value, minus, used) {
+    var s = String(value);
+    for (var i = 0; i < s.length; i++) {
+      if (!moveDigit(rods, s.length - 1 - i, s.charCodeAt(i) - 48, minus, used)) return false;
+    }
+    return true;
+  }
+
+  function newRods() { return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; }
+
+  /*
+   * Which formulas a list of signed (scaled) integers needs on the abacus.
+   * Returns { used: {direct, small, big, combo}, ok } where ok is false if the
+   * total ever drops below zero.
+   */
+  function analyseSum(values) {
+    var rods = newRods(), used = {}, total = 0;
+    for (var i = 0; i < values.length; i++) {
+      total += values[i];
+      if (total < 0) return { used: used, ok: false };
+      moveNumber(rods, Math.abs(values[i]), values[i] < 0, used);
+    }
+    return { used: used, ok: true };
+  }
+
+  function formulasAllowed(used, allowed) {
+    for (var f in used) if (used[f] && allowed.indexOf(f) < 0) return false;
+    return true;
+  }
+
+  // ---------- question builders ----------
+  // Each builder gets (rng, item, level) and returns a question, or null if it
+  // could not make one (the caller then just tries again).
+
+  var SMALL_RANGE = 200; // enumerate all candidates when the range is this small
+
+  /*
+   * Vertical add/subtract sum, the classic abacus "list". Every row is checked
+   * rod by rod so the sum only needs formulas the level has taught, and the
+   * running total stays above zero (and under maxTotal).
+   */
+  function buildAddSub(rng, item, level) {
+    var dp = item.dp || 0;
+    var scale = POW10[dp];
+    var maxTotal = level.maxTotal ? level.maxTotal * scale : Infinity;
+    var allowed = level.formulas;
+    var lo = item.digits[0], hi = item.digits[1];
+    var minV = lo <= 1 ? 1 : Math.pow(10, lo - 1);
+    var maxV = Math.pow(10, hi) - 1;
+    var small = !dp && maxV - minV < SMALL_RANGE;
+
+    function randomValue() {
+      var d = rng.int(lo, hi);
+      if (!dp) return rng.digits(d);
+      var whole = rng.digits(d);
+      return whole * scale + rng.int(1, scale - 1); // decimal part never .0
+    }
+
+    // Can `v` (signed) go next, given the current beads and total?
+    function fits(rods, total, v) {
+      var t = total + v;
+      if (t <= 0 || t > maxTotal) return null;
+      var copy = rods.slice(), used = {};
+      if (!moveNumber(copy, Math.abs(v), v < 0, used)) return null;
+      if (!formulasAllowed(used, allowed)) return null;
+      return copy;
+    }
+
+    for (var attempt = 0; attempt < 20; attempt++) {
+      var rows = rng.int(item.rows[0], item.rows[1]);
+      var rods = newRods(), total = 0, values = [];
+      for (var i = 0; i < rows; i++) {
+        var wantMinus = i > 0 && rng.chance(item.sub || 0);
+        var v = null, next = null;
+        if (small) {
+          // Pick from every number that fits, so tight levels never get stuck.
+          var plus = [], minus = [];
+          for (var c = minV; c <= maxV; c++) {
+            if (fits(rods, total, c)) plus.push(c);
+            if (i > 0 && item.sub && fits(rods, total, -c)) minus.push(-c);
+          }
+          // Prefer the sign we rolled; use the other one only if it is empty.
+          var pool = (wantMinus && minus.length) || !plus.length ? minus : plus;
+          if (pool.length) v = rng.pick(pool);
+        } else {
+          for (var tries = 0; tries < 60 && v === null; tries++) {
+            var cand = randomValue();
+            if (wantMinus && tries < 40) cand = -cand;
+            if (fits(rods, total, cand)) v = cand;
+          }
+        }
+        if (v === null) break;
+        next = fits(rods, total, v);
+        rods = next;
+        total += v;
+        values.push(v);
+      }
+      if (values.length < item.rows[0]) continue;
+      return {
+        kind: 'stack',
+        lines: values.map(function (x) { return fixed(x, dp); }),
+        answer: [num(fixed(total, dp))]
+      };
+    }
+    return null;
+  }
+
+  function buildMul(rng, item) {
+    var adp = item.adp || 0, bdp = item.bdp || 0;
+    for (var tries = 0; tries < 100; tries++) {
+      var a = rng.digits(item.a + adp);
+      var b = rng.digits(item.b + bdp);
+      if (b < 2 || a % 10 === 0 || b % 10 === 0) continue;
+      return {
+        kind: 'stack',
+        lines: [fixed(a, adp), '×' + fixed(b, bdp)],
+        answer: [num(trimmed(a * b, adp + bdp))]
+      };
+    }
+    return null;
   }
 
   // Exact division: dividend has `dd` digits, divisor has `dv` digits.
   // qdp > 0 makes a decimal quotient (e.g. 45.6 ÷ 4 = 11.4).
-  function divide(rng, dd, dv, opts) {
-    opts = opts || {};
-    var qdp = opts.qdp || 0;
+  function buildDiv(rng, item) {
+    var qdp = item.qdp || 0;
     for (var tries = 0; tries < 200; tries++) {
-      var divisor = rng.digits(dv);
+      var divisor = rng.digits(item.dv);
       if (divisor < 2 || divisor % 10 === 0) continue;
-      var lo = Math.ceil(Math.pow(10, dd + qdp - 1) / divisor);
-      var hi = Math.floor((Math.pow(10, dd + qdp) - 1) / divisor);
+      var lo = Math.ceil(Math.pow(10, item.dd + qdp - 1) / divisor);
+      var hi = Math.floor((Math.pow(10, item.dd + qdp) - 1) / divisor);
       if (lo > hi) continue;
       var q = rng.int(Math.max(lo, 2), hi);
       var dividend = q * divisor;
@@ -194,71 +306,48 @@
       if (qdp && (q % 10 === 0 || dividend % 10 === 0)) continue;
       return {
         kind: 'stack',
-        op: 'div',
         lines: [fixed(dividend, qdp), '÷' + divisor],
-        answer: [num(trimmed(q, qdp))],
-        value: q / POW10[qdp]
+        answer: [num(trimmed(q, qdp))]
       };
     }
-    return divide(rng, dd, 1, opts);
+    return null;
   }
 
-  function percentage(rng, hard) {
+  function buildPct(rng, item) {
     var p, base;
-    if (hard) {
+    if (item.hard) {
       p = rng.int(2, 95);
       base = rng.digits(rng.int(2, 4));
     } else {
       p = rng.pick([5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 80, 90]);
       base = rng.int(2, 40) * 20;
     }
-    var scaled = p * base; // answer * 100
     return {
       kind: 'inline',
-      op: 'pct',
       tokens: [num(p + '%'), text('of'), num(base)],
-      answer: [num(trimmed(scaled, 2))],
-      value: scaled / 100
+      answer: [num(trimmed(p * base, 2))] // p * base is the answer × 100
     };
   }
 
-  function squareRoot(rng, rootDigits) {
-    var r = rng.digits(rootDigits);
+  function buildSqrt(rng, item) {
+    var r = rng.digits(rng.int(item.digits[0], item.digits[1]));
     if (r < 4) r += 4;
     return {
       kind: 'inline',
-      op: 'sqrt',
       tokens: [{ t: 'root', v: String(r * r), index: '' }],
-      answer: [num(r)],
-      value: r
+      answer: [num(r)]
     };
   }
 
-  function cubeRoot(rng) {
+  function buildCbrt(rng) {
     var r = rng.int(11, 99);
     return {
       kind: 'inline',
-      op: 'cbrt',
       tokens: [{ t: 'root', v: String(r * r * r), index: '3' }],
-      answer: [num(r)],
-      value: r
+      answer: [num(r)]
     };
   }
 
-  // "3/4 of 48"
-  function fractionOf(rng) {
-    var f = properFraction(rng), n = f[0], d = f[1];
-    var base = d * rng.int(2, 25);
-    return {
-      kind: 'inline',
-      op: 'fracof',
-      tokens: [frac(n, d), text('of'), num(base)],
-      answer: [num((base / d) * n)],
-      value: (base / d) * n
-    };
-  }
-
-  // a/b ± c/d, answer simplified (mixed number when > 1).
   // Proper fraction in lowest terms, e.g. 3/8 (never 2/4).
   function properFraction(rng) {
     var d, n;
@@ -266,7 +355,19 @@
     return [n, d];
   }
 
-  function fractionSum(rng) {
+  // "3/4 of 48"
+  function buildFracOf(rng) {
+    var f = properFraction(rng), n = f[0], d = f[1];
+    var base = d * rng.int(4, 25);
+    return {
+      kind: 'inline',
+      tokens: [frac(n, d), text('of'), num(base)],
+      answer: [num((base / d) * n)]
+    };
+  }
+
+  // a/b ± c/d, answer simplified (mixed number when > 1).
+  function buildFracSum(rng) {
     var f1 = properFraction(rng), f2 = properFraction(rng);
     var a = f1[0], b = f1[1], c = f2[0], d = f2[1];
     var minus = rng.chance(0.4);
@@ -279,190 +380,267 @@
     var n = minus ? n1 - n2 : n1 + n2;
     return {
       kind: 'inline',
-      op: 'frac',
       tokens: [frac(a, b), op(minus ? '-' : '+'), frac(c, d)],
-      answer: fracAnswer(n, den),
-      value: n / den
+      answer: fracAnswer(n, den)
     };
   }
 
   // Mixed operations following BODMAS, always a whole, non-negative answer.
-  function mixedOps(rng) {
+  function buildMixed(rng) {
     var shape = rng.int(0, 3);
     var a, b, c, d, v, tokens;
-    for (var tries = 0; tries < 100; tries++) {
-      if (shape === 0) { // a × b + c
-        a = rng.int(12, 99); b = rng.int(3, 9); c = rng.int(10, 999);
-        v = a * b + c;
-        tokens = [num(a), op('×'), num(b), op('+'), num(c)];
-      } else if (shape === 1) { // a ÷ b + c × d
-        b = rng.int(2, 9); a = b * rng.int(3, 30); c = rng.int(3, 25); d = rng.int(2, 9);
-        v = a / b + c * d;
-        tokens = [num(a), op('÷'), num(b), op('+'), num(c), op('×'), num(d)];
-      } else if (shape === 2) { // (a + b) × c
-        a = rng.int(10, 99); b = rng.int(10, 99); c = rng.int(2, 9);
-        v = (a + b) * c;
-        tokens = [text('('), num(a), op('+'), num(b), text(')'), op('×'), num(c)];
-      } else { // a × b − c ÷ d
-        a = rng.int(12, 60); b = rng.int(3, 9); d = rng.int(2, 9); c = d * rng.int(2, 20);
-        v = a * b - c / d;
-        tokens = [num(a), op('×'), num(b), op('-'), num(c), op('÷'), num(d)];
-      }
-      if (v >= 0) break;
+    if (shape === 0) { // a × b + c
+      a = rng.int(12, 99); b = rng.int(3, 9); c = rng.int(10, 999);
+      v = a * b + c;
+      tokens = [num(a), op('×'), num(b), op('+'), num(c)];
+    } else if (shape === 1) { // a ÷ b + c × d
+      b = rng.int(2, 9); a = b * rng.int(3, 30); c = rng.int(3, 25); d = rng.int(2, 9);
+      v = a / b + c * d;
+      tokens = [num(a), op('÷'), num(b), op('+'), num(c), op('×'), num(d)];
+    } else if (shape === 2) { // (a + b) × c
+      a = rng.int(10, 99); b = rng.int(10, 99); c = rng.int(2, 9);
+      v = (a + b) * c;
+      tokens = [text('('), num(a), op('+'), num(b), text(')'), op('×'), num(c)];
+    } else { // a × b − c ÷ d  (a × b >= 36 > c ÷ d, so never negative)
+      a = rng.int(12, 60); b = rng.int(3, 9); d = rng.int(2, 9); c = d * rng.int(2, 20);
+      v = a * b - c / d;
+      tokens = [num(a), op('×'), num(b), op('-'), num(c), op('÷'), num(d)];
     }
-    return { kind: 'inline', op: 'mixed', tokens: tokens, answer: [num(v)], value: v };
+    return { kind: 'inline', tokens: tokens, answer: [num(v)] };
   }
 
-  // ---------- levels ----------
+  /*
+   * Negative-number sum: numbers may be negative and the total may go below
+   * zero (mental maths, not bead work). At least one subtotal is negative.
+   */
+  function buildNegSum(rng, item) {
+    for (var tries = 0; tries < 50; tries++) {
+      var rows = rng.int(item.rows[0], item.rows[1]);
+      var values = [], total = 0, wentNegative = false;
+      for (var i = 0; i < rows; i++) {
+        var v = rng.digits(rng.int(item.digits[0], item.digits[1]));
+        if (rng.chance(i === 0 ? 0.6 : 0.5)) v = -v;
+        values.push(v);
+        total += v;
+        if (total < 0) wentNegative = true;
+      }
+      if (!wentNegative || total === 0) continue;
+      return {
+        kind: 'stack',
+        lines: values.map(String),
+        answer: [num(total)]
+      };
+    }
+    return null;
+  }
 
-  function col(rows, digits, sub, extra) {
-    return function (rng) {
-      var o = { rows: rows, digits: digits, sub: sub };
-      if (extra) for (var k in extra) o[k] = extra[k];
-      return columnSum(rng, o);
+  // Division with remainder: 347 ÷ 6 = 57 R 5. The remainder is never 0.
+  function buildDivRem(rng, item) {
+    var lo = Math.pow(10, item.dd - 1), hi = Math.pow(10, item.dd) - 1;
+    for (var tries = 0; tries < 200; tries++) {
+      var divisor = rng.digits(item.dv);
+      if (divisor < 3 || divisor % 10 === 0) continue;
+      var dividend = rng.int(lo, hi);
+      var q = Math.floor(dividend / divisor), r = dividend % divisor;
+      if (q < 2 || r === 0) continue;
+      return {
+        kind: 'stack',
+        lines: [String(dividend), '÷' + divisor],
+        answer: [num(q + ' R ' + r)],
+        answerHint: 'R'
+      };
+    }
+    return null;
+  }
+
+  function buildPower(e) {
+    return function (rng, item) {
+      var n;
+      do { n = rng.digits(rng.int(item.digits[0], item.digits[1])); } while (n % 10 === 0 || n < 11);
+      return {
+        kind: 'inline',
+        tokens: [{ t: 'pow', v: String(n), e: String(e) }],
+        answer: [num(Math.pow(n, e))]
+      };
     };
   }
-  function mul(a, b, o) { return function (rng) { return multiply(rng, a, b, o); }; }
-  function div(a, b, o) { return function (rng) { return divide(rng, a, b, o); }; }
 
-  var LEVELS = {
-    1: {
-      name: 'Level 1', stage: 'Beginner',
-      about: '1-digit adding & taking away, small friends',
-      recipes: [
-        [45, col([3, 5], [1, 1], 0.35, { maxTotal: 9 })],
-        [35, col([3, 5], [1, 1], 0.3, { maxTotal: 30 })],
-        [20, col([2, 3], [1, 2], 0.25)]
-      ]
-    },
-    2: {
-      name: 'Level 2', stage: 'Beginner',
-      about: '1 & 2-digit sums, big friends',
-      recipes: [
-        [35, col([5, 8], [1, 1], 0.35)],
-        [35, col([3, 5], [2, 2], 0.3)],
-        [30, col([4, 6], [1, 2], 0.35)]
-      ]
-    },
-    3: {
-      name: 'Level 3', stage: 'Beginner',
-      about: '2 & 3-digit sums, combination friends',
-      recipes: [
-        [35, col([4, 7], [2, 2], 0.35)],
-        [35, col([5, 8], [1, 3], 0.35)],
-        [30, col([3, 5], [3, 3], 0.3)]
-      ]
-    },
-    4: {
-      name: 'Level 4', stage: 'Intermediate',
-      about: 'Longer sums, times tables, multiplication',
-      recipes: [
-        [45, col([5, 8], [2, 3], 0.35)],
-        [10, mul(1, 1)],
-        [27, mul(2, 1)],
-        [18, mul(3, 1)]
-      ]
-    },
-    5: {
-      name: 'Level 5', stage: 'Intermediate',
-      about: 'Multiplication & starting division',
-      recipes: [
-        [40, col([5, 10], [2, 4], 0.35)],
-        [15, mul(3, 1)],
-        [15, mul(2, 2)],
-        [15, div(2, 1)],
-        [15, div(3, 1)]
-      ]
-    },
-    6: {
-      name: 'Level 6', stage: 'Intermediate',
-      about: 'Decimals, bigger multiplication & division',
-      recipes: [
-        [25, col([6, 10], [3, 4], 0.35)],
-        [15, col([4, 7], [1, 2], 0.3, { dp: 1 })],
-        [12, mul(3, 2)],
-        [10, mul(4, 1)],
-        [8, mul(1, 1, { adp: 1 })],
-        [10, div(4, 1)],
-        [12, div(3, 2)],
-        [8, div(2, 1, { qdp: 1 })]
-      ]
-    },
-    7: {
-      name: 'Level 7', stage: 'Advanced',
-      about: 'Large numbers, %, square roots, fractions',
-      recipes: [
-        [20, col([6, 10], [3, 5], 0.35)],
-        [10, col([5, 8], [1, 3], 0.3, { dp: 2 })],
-        [8, mul(3, 3)],
-        [7, mul(4, 2)],
-        [8, div(4, 2)],
-        [7, div(5, 2)],
-        [5, mul(2, 1, { adp: 1 })],
-        [5, div(3, 1, { qdp: 2 })],
-        [10, function (rng) { return percentage(rng, false); }],
-        [10, function (rng) { return squareRoot(rng, 2); }],
-        [10, fractionOf]
-      ]
-    },
-    8: {
-      name: 'Level 8', stage: 'Grand Master',
-      about: 'Competition mix: roots, fractions, BODMAS',
-      recipes: [
-        [15, col([8, 12], [4, 6], 0.4)],
-        [8, col([6, 10], [2, 4], 0.35, { dp: 2 })],
-        [5, mul(4, 3)],
-        [5, mul(5, 2)],
-        [6, div(6, 2)],
-        [6, div(5, 3)],
-        [7, mul(2, 1, { adp: 1, bdp: 1 })],
-        [8, function (rng) { return percentage(rng, true); }],
-        [10, function (rng) { return squareRoot(rng, rng.int(2, 3)); }],
-        [6, cubeRoot],
-        [10, fractionSum],
-        [14, mixedOps]
-      ]
+  function lcm(a, b) { return (a / gcd(a, b)) * b; }
+
+  function distinctSorted(list) {
+    var out = list.slice().sort(function (a, b) { return a - b; });
+    for (var i = 1; i < out.length; i++) if (out[i] === out[i - 1]) return null;
+    return out;
+  }
+
+  function fn(name, nums) { return { t: 'fn', v: name, args: nums.map(String) }; }
+
+  // LCM of 2-3 small numbers that share a factor (so it is not just a product).
+  function buildLcm(rng, item) {
+    for (var tries = 0; tries < 200; tries++) {
+      var k = rng.int(item.count[0], item.count[1]);
+      var list = [];
+      for (var i = 0; i < k; i++) list.push(rng.int(2, item.max));
+      list = distinctSorted(list);
+      if (!list) continue;
+      var l = list.reduce(lcm), p = list.reduce(function (a, b) { return a * b; });
+      if (l === p || l > 999 || l === list[list.length - 1]) continue;
+      return { kind: 'inline', tokens: [fn('LCM', list)], answer: [num(l)] };
     }
+    return null;
+  }
+
+  // HCF of 2-3 numbers built as h × (small multipliers with no common factor).
+  function buildHcf(rng, item) {
+    for (var tries = 0; tries < 200; tries++) {
+      var k = rng.int(item.count[0], item.count[1]);
+      var h = rng.int(2, 15), list = [];
+      for (var i = 0; i < k; i++) list.push(h * rng.int(2, 9));
+      list = distinctSorted(list);
+      if (!list || list[list.length - 1] > item.max) continue;
+      var g = list.reduce(gcd);
+      if (g !== h) continue;
+      return { kind: 'inline', tokens: [fn('HCF', list)], answer: [num(g)] };
+    }
+    return null;
+  }
+
+  var BUILDERS = {
+    addsub: buildAddSub,
+    negsum: buildNegSum,
+    mul: buildMul,
+    div: buildDiv,
+    divrem: buildDivRem,
+    square: buildPower(2),
+    cube: buildPower(3),
+    lcm: buildLcm,
+    hcf: buildHcf,
+    pct: buildPct,
+    sqrt: buildSqrt,
+    cbrt: buildCbrt,
+    fracof: buildFracOf,
+    fracsum: buildFracSum,
+    mixed: buildMixed
   };
 
+
+  // ---------- Quick Drill ----------
+
+  // Exact "digit string × small whole number", any length (no float limits).
+  function mulString(str, m) {
+    var out = '', carry = 0;
+    for (var i = str.length - 1; i >= 0; i--) {
+      var p = (str.charCodeAt(i) - 48) * m + carry;
+      out = (p % 10) + out;
+      carry = Math.floor(p / 10);
+    }
+    return carry ? carry + out : out;
+  }
+
+  /*
+   * Quick Drill: one random number per row (no leading zero); the child
+   * writes number × each multiplier.
+   *   opts: { digits, multipliers } override QUICK_DRILL in config.js
+   */
+  function generateQuickDrill(count, sheetId, opts) {
+    opts = opts || {};
+    var Q = CONFIG.QUICK_DRILL;
+    var digits = Math.max(1, Math.min(18, Math.round(opts.digits || Q.digits)));
+    var multipliers = opts.multipliers || Q.multipliers;
+    var id = sheetId || newSheetId();
+    count = clampCount(count);
+    var rng = new Rng(seedFromId(id + ':quick:' + count + ':' + digits + ':' + multipliers.join(',')));
+    var rows = [], seen = {};
+    var maxAttempts = count * 40 + 200;
+    for (var attempts = 0; rows.length < count && attempts < maxAttempts; attempts++) {
+      var n = String(rng.int(1, 9));
+      for (var i = 1; i < digits; i++) n += rng.int(0, 9);
+      if (seen[n]) continue;
+      seen[n] = true;
+      rows.push({
+        number: n,
+        answers: multipliers.map(function (m) { return mulString(n, m); })
+      });
+    }
+    var warning = null;
+    if (rows.length < count) {
+      warning = 'Only ' + rows.length + ' different ' + digits + '-digit numbers exist, ' +
+        'so the sheet has ' + rows.length + ' rows instead of ' + count + '.';
+    }
+    return {
+      type: 'quick', id: id, level: 'quick', count: rows.length,
+      digits: digits, multipliers: multipliers.slice(), rows: rows,
+      rowsPerTable: Q.rowsPerTable, warning: warning
+    };
+  }
+
   function signature(q) {
-    var body = q.kind === 'stack' ? q.lines.join('|')
-      : q.tokens.map(function (t) { return t.t + ':' + (t.v || '') + (t.n || '') + '/' + (t.d || '') + (t.index || ''); }).join(' ');
+    var body = q.kind === 'stack' ? q.lines.join('|') : JSON.stringify(q.tokens);
     return q.kind + '#' + body;
+  }
+
+  function clampCount(count) {
+    var n = Math.round(Number(count));
+    if (!isFinite(n)) n = CONFIG.COUNT.default;
+    return Math.max(CONFIG.COUNT.min, Math.min(CONFIG.COUNT.max, n));
   }
 
   /*
    * Build a worksheet.
-   *   level: 1..8 or 'all'
-   *   count: number of questions (10..500)
+   *   level:   1..8, 'all', or 'quick' (Quick Drill, see generateQuickDrill)
+   *   count:   number of questions (clamped to COUNT.min..COUNT.max)
    *   sheetId: optional; random when omitted
+   *   opts:    { levels } to use other level rules (tests)
+   * If a level cannot make enough different questions the sheet is shorter
+   * and `warning` explains why.
    */
-  function generateWorksheet(level, count, sheetId) {
+  function generateWorksheet(level, count, sheetId, opts) {
+    opts = opts || {};
+    if (level === 'quick') return generateQuickDrill(count, sheetId, opts);
+    var levels = opts.levels || CONFIG.LEVELS;
     var id = sheetId || newSheetId();
+    count = clampCount(count);
     var rng = new Rng(seedFromId(id + ':' + level + ':' + count));
-    count = Math.max(10, Math.min(500, Math.round(count) || 0));
+    var keys = Object.keys(levels);
     var seen = {};
     var questions = [];
-    var guard = 0;
-    while (questions.length < count && guard < count * 50) {
-      guard++;
-      var lv = level === 'all' ? rng.int(1, 8) : Number(level);
-      var q = rng.weighted(LEVELS[lv].recipes)(rng);
+    var maxAttempts = count * 40 + 200;
+    for (var attempts = 0; questions.length < count && attempts < maxAttempts; attempts++) {
+      var lv = level === 'all' ? Number(rng.pick(keys)) : Number(level);
+      var L = levels[lv];
+      if (!L) throw new Error('Unknown level: ' + level);
+      var spec = rng.weightedIndex(L.mix);
+      var item = L.mix[spec];
+      var build = BUILDERS[item.type];
+      if (!build) throw new Error('Unknown question type: ' + item.type);
+      var q = build(rng, item, L);
+      if (!q) continue;
       var sig = signature(q);
       if (seen[sig]) continue;
       seen[sig] = true;
+      q.type = item.type;
       q.level = lv;
+      q.spec = spec;
       questions.push(q);
     }
-    return { id: id, level: level, count: questions.length, questions: questions, rng: rng };
+    var warning = null;
+    if (questions.length < count) {
+      warning = 'This level only had ' + questions.length + ' different questions to give, ' +
+        'so the sheet has ' + questions.length + ' instead of ' + count + '.';
+    }
+    return { type: 'levels', id: id, level: level, count: questions.length, questions: questions, warning: warning };
   }
 
   var api = {
-    LEVELS: LEVELS,
+    LEVELS: CONFIG.LEVELS,
+    CONFIG: CONFIG,
     generateWorksheet: generateWorksheet,
+    generateQuickDrill: generateQuickDrill,
     newSheetId: newSheetId,
+    clampCount: clampCount,
+    analyseSum: analyseSum,
     // exposed for tests
-    _internal: { Rng: Rng, fixed: fixed, trimmed: trimmed, fracAnswer: fracAnswer, gcd: gcd }
+    _internal: { Rng: Rng, fixed: fixed, trimmed: trimmed, fracAnswer: fracAnswer, gcd: gcd, BUILDERS: BUILDERS, digitCount: digitCount, mulString: mulString }
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -52,8 +52,7 @@
     </section>
 
     <button type="button" class="go" id="generate">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg>
-      Generate Worksheet
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg><span> Generate Worksheet</span>
     </button>
 
     <section class="result" id="result" hidden aria-live="polite">
@@ -61,6 +60,7 @@
       <div class="result-text">
         <strong>Your worksheet is ready!</strong>
         <span id="resultInfo"></span>
+        <span class="warning" id="warning" hidden></span>
       </div>
       <div class="result-actions">
         <a class="btn primary" id="openBtn" target="_blank" rel="noopener">Open &amp; Print</a>
@@ -71,11 +71,12 @@
     <p class="error" id="error" hidden></p>
 
     <footer class="tips">
-      <p><strong>Every sheet is different.</strong> Operations, digits and number of rows are mixed up each time. The answer key is at the end, after a blank page, so you can print double-sided without the answers showing through.</p>
+      <p><strong>Every sheet is different.</strong> Operations, digits and number of rows are mixed up each time, and every sum follows the abacus formulas of its level. The answer key is at the end, after a blank page, so you can print double-sided without the answers showing through.</p>
     </footer>
   </main>
 
   <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/generator.js"></script>
   <script src="js/pdf.js"></script>
   <script src="js/app.js"></script>
