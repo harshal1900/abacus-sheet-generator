@@ -247,8 +247,9 @@
           var plus = [], minus = [];
           for (var c = minV; c <= maxV; c++) {
             if (fits(rods, total, c)) plus.push(c);
-            if (i > 0 && fits(rods, total, -c)) minus.push(-c);
+            if (i > 0 && item.sub && fits(rods, total, -c)) minus.push(-c);
           }
+          // Prefer the sign we rolled; use the other one only if it is empty.
           var pool = (wantMinus && minus.length) || !plus.length ? minus : plus;
           if (pool.length) v = rng.pick(pool);
         } else {
