@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const gen = require('../js/generator.js');
 const { LEVELS } = require('../js/config.js');
+const { checkAnswer } = require('./exact.js');
 
 const SHEETS = 500;      // sheets per level
 const PER_SHEET = 60;    // questions per sheet
@@ -93,7 +94,22 @@ function checkQuestion(q) {
     assert.strictEqual(intDigits(a), item.dd, 'dividend digits ' + where);
     assert.strictEqual(b.length, item.dv, 'divisor digits ' + where);
     assert.strictEqual(decimals(a), item.qdp || 0);
+  } else if (item.type === 'negsum') {
+    assert.ok(q.lines.length >= item.rows[0] && q.lines.length <= item.rows[1], 'rows ' + where);
+    for (const line of q.lines) {
+      const d = intDigits(line);
+      assert.ok(d >= item.digits[0] && d <= item.digits[1], 'digits ' + where);
+    }
+  } else if (item.type === 'square' || item.type === 'cube') {
+    const base = q.tokens[0].v;
+    assert.ok(base.length >= item.digits[0] && base.length <= item.digits[1], 'base digits ' + where);
+    assert.strictEqual(q.tokens[0].e, item.type === 'square' ? '2' : '3');
+  } else if (item.type === 'lcm' || item.type === 'hcf') {
+    const args = q.tokens[0].args.map(Number);
+    assert.ok(args.length >= item.count[0] && args.length <= item.count[1], 'count ' + where);
+    assert.ok(args.every((n) => n >= 2 && n <= item.max), 'max ' + where);
   }
+  checkAnswer(q);
 }
 
 test('the test bead model agrees with known abacus examples', () => {

@@ -95,7 +95,9 @@
         { type: 'mul', weight: 14, a: 3, b: 1 },
         { type: 'mul', weight: 14, a: 2, b: 2 },
         { type: 'div', weight: 12, dd: 2, dv: 1 },
-        { type: 'div', weight: 12, dd: 3, dv: 1 }
+        { type: 'div', weight: 12, dd: 3, dv: 1 },
+        { type: 'divrem', weight: 6, dd: 2, dv: 1 },
+        { type: 'divrem', weight: 6, dd: 3, dv: 1 }
       ]
     },
     6: {
@@ -112,7 +114,9 @@
         { type: 'mul', weight: 7, a: 1, b: 1, adp: 1 },
         { type: 'div', weight: 8, dd: 4, dv: 1 },
         { type: 'div', weight: 9, dd: 3, dv: 2 },
-        { type: 'div', weight: 7, dd: 2, dv: 1, qdp: 1 }
+        { type: 'div', weight: 7, dd: 2, dv: 1, qdp: 1 },
+        { type: 'divrem', weight: 7, dd: 3, dv: 1 },
+        { type: 'square', weight: 6, digits: [2, 2] }
       ]
     },
     7: {
@@ -124,15 +128,21 @@
       mix: [
         { type: 'addsub', weight: 14, rows: [6, 10], digits: [3, 5], sub: 0.35 },
         { type: 'addsub', weight: 7, rows: [5, 8], digits: [1, 3], sub: 0.3, dp: 2 },
+        { type: 'negsum', weight: 6, rows: [3, 6], digits: [2, 3] },
         { type: 'mul', weight: 6, a: 3, b: 3 },
         { type: 'mul', weight: 5, a: 4, b: 2 },
         { type: 'mul', weight: 4, a: 2, b: 1, adp: 1 },
         { type: 'div', weight: 6, dd: 4, dv: 2 },
         { type: 'div', weight: 5, dd: 5, dv: 2 },
         { type: 'div', weight: 4, dd: 3, dv: 1, qdp: 2 },
+        { type: 'divrem', weight: 4, dd: 4, dv: 2 },
         { type: 'pct', weight: 6, hard: false },
         { type: 'sqrt', weight: 6, digits: [2, 2] },
-        { type: 'fracof', weight: 6 }
+        { type: 'fracof', weight: 6 },
+        { type: 'square', weight: 5, digits: [2, 2] },
+        { type: 'cube', weight: 4, digits: [2, 2] },
+        { type: 'lcm', weight: 3, count: [2, 3], max: 24 },
+        { type: 'hcf', weight: 3, count: [2, 3], max: 120 }
       ]
     },
     8: {
@@ -144,16 +154,23 @@
       mix: [
         { type: 'addsub', weight: 11, rows: [8, 12], digits: [4, 6], sub: 0.4 },
         { type: 'addsub', weight: 6, rows: [6, 10], digits: [2, 4], sub: 0.35, dp: 2 },
+        { type: 'negsum', weight: 6, rows: [4, 7], digits: [2, 4] },
         { type: 'mul', weight: 4, a: 4, b: 3 },
         { type: 'mul', weight: 4, a: 5, b: 2 },
         { type: 'mul', weight: 5, a: 2, b: 1, adp: 1, bdp: 1 },
         { type: 'div', weight: 5, dd: 6, dv: 2 },
         { type: 'div', weight: 5, dd: 5, dv: 3 },
+        { type: 'div', weight: 4, dd: 4, dv: 2, qdp: 1 },
+        { type: 'divrem', weight: 4, dd: 5, dv: 2 },
         { type: 'pct', weight: 5, hard: true },
         { type: 'sqrt', weight: 6, digits: [2, 3] },
         { type: 'cbrt', weight: 4 },
         { type: 'fracsum', weight: 7 },
-        { type: 'mixed', weight: 9 }
+        { type: 'mixed', weight: 9 },
+        { type: 'square', weight: 4, digits: [3, 3] },
+        { type: 'cube', weight: 3, digits: [2, 3] },
+        { type: 'lcm', weight: 3, count: [2, 3], max: 30 },
+        { type: 'hcf', weight: 3, count: [2, 3], max: 200 }
       ]
     }
   };

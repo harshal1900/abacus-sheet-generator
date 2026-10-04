@@ -33,7 +33,18 @@ function answerValue(tokens) {
 }
 
 // Evaluate an inline expression with normal precedence (× ÷ before + -).
+const bgcd = (a, b) => { while (b) [a, b] = [b, a % b]; return a < 0n ? -a : a; };
+
 function evalInline(tokens) {
+  const pow = tokens.find((t) => t.t === 'pow');
+  if (pow) return [BigInt(pow.v) ** BigInt(pow.e), 1n];
+  const fn = tokens.find((t) => t.t === 'fn');
+  if (fn) {
+    const args = fn.args.map(BigInt);
+    if (fn.v === 'HCF') return [args.reduce(bgcd), 1n];
+    if (fn.v === 'LCM') return [args.reduce((a, b) => (a / bgcd(a, b)) * b), 1n];
+    throw new Error('unknown function ' + fn.v);
+  }
   const root = tokens.find((t) => t.t === 'root');
   if (root) {
     const v = Number(root.v);
@@ -70,16 +81,41 @@ function evalInline(tokens) {
   return out[0];
 }
 
+// Division with remainder: check dividend = q × divisor + r with 0 < r < divisor.
+function checkDivRem(q) {
+  const m = /^(\d+) R (\d+)$/.exec(q.answer[0].v);
+  assert.ok(m, 'answer must look like "Q R r": ' + q.answer[0].v);
+  const [dividend, divisor] = [BigInt(q.lines[0]), BigInt(q.lines[1].slice(1))];
+  const [quot, rem] = [BigInt(m[1]), BigInt(m[2])];
+  assert.strictEqual(quot * divisor + rem, dividend, 'remainder sum ' + q.lines);
+  assert.ok(rem > 0n && rem < divisor, 'remainder range ' + q.lines);
+  assert.strictEqual(q.answer.length, 1);
+}
+
+// Check any question against its answer. Throws on a wrong or inexact answer.
+function checkAnswer(q) {
+  if (q.type === 'divrem') return checkDivRem(q);
+  const expected = q.kind === 'stack' ? evalStack(q) : evalInline(q.tokens);
+  assert.ok(eq(expected, answerValue(q.answer)),
+    `wrong answer for ${JSON.stringify(q.lines || q.tokens)}: got ${JSON.stringify(q.answer)}`);
+  // Answers are written exactly: whole numbers, finite decimals or fractions.
+  for (const t of q.answer) {
+    assert.ok(t.t === 'frac' || /^-?\d+(\.\d+)?$/.test(t.v), 'answer format ' + t.v);
+  }
+}
+
 function evalStack(q) {
   if (q.type === 'mul') return mul(rat(q.lines[0]), rat(q.lines[1].slice(1)));
   if (q.type === 'div') return div(rat(q.lines[0]), rat(q.lines[1].slice(1)));
   let total = [0n, 1n];
   for (const line of q.lines) {
     total = add(total, rat(line));
-    assert.ok(total[0] * total[1] > 0n, 'running total must stay above zero: ' + q.lines.join(','));
+    if (q.type === 'addsub') {
+      assert.ok(total[0] * total[1] > 0n, 'running total must stay above zero: ' + q.lines.join(','));
+    }
   }
   return total;
 }
 
 
-module.exports = { rat, add, sub, mul, div, eq, tokenValue, answerValue, evalInline, evalStack };
+module.exports = { checkAnswer, checkDivRem, rat, add, sub, mul, div, eq, tokenValue, answerValue, evalInline, evalStack };

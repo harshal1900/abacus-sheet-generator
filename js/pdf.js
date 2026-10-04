@@ -38,17 +38,31 @@
       doc.setFontSize(fs);
       return fs * 0.62 + doc.getTextWidth(tok.v) + 2;
     }
+    if (tok.t === 'pow') {
+      doc.setFontSize(fs * 0.62);
+      var ew = doc.getTextWidth(tok.e);
+      doc.setFontSize(fs);
+      return doc.getTextWidth(tok.v) + ew + 1;
+    }
     doc.setFontSize(fs);
-    return doc.getTextWidth(tok.v);
+    return doc.getTextWidth(tokenText(tok));
+  }
+
+  function tokenText(tok) {
+    return tok.t === 'fn' ? tok.v + ' (' + tok.args.join(', ') + ')' : tok.v;
   }
 
   function tokensWidth(doc, tokens, fs) {
     var w = 0;
-    for (var i = 0; i < tokens.length; i++) w += tokenWidth(doc, tokens[i], fs);
-    return w + spacing(fs) * (tokens.length - 1);
+    for (var i = 0; i < tokens.length; i++) w += tokenWidth(doc, tokens[i], fs) + gapAfter(tokens, i, fs);
+    return w;
   }
 
-  function spacing(fs) { return fs * 0.28; }
+  // Space after token i: none at the end or just inside brackets.
+  function gapAfter(tokens, i, fs) {
+    if (i === tokens.length - 1 || tokens[i].v === '(' || tokens[i + 1].v === ')') return 0;
+    return fs * 0.28;
+  }
 
   function hasFrac(tokens) {
     for (var i = 0; i < tokens.length; i++) if (tokens[i].t === 'frac') return true;
@@ -92,13 +106,20 @@
           doc.setFontSize(fs);
         }
         doc.text(tok.v, x + fs * 0.62, base);
+      } else if (tok.t === 'pow') {
+        doc.setFontSize(fs);
+        var bw = doc.getTextWidth(tok.v);
+        doc.text(tok.v, x, base);
+        doc.setFontSize(fs * 0.62);
+        doc.text(tok.e, x + bw + 1, base - fs * 0.42);
+        doc.setFontSize(fs);
       } else {
         doc.setFontSize(fs);
         if (tok.t === 'text') doc.setTextColor.apply(doc, MUTED);
-        doc.text(tok.v, x, base);
+        doc.text(tokenText(tok), x, base);
         doc.setTextColor.apply(doc, INK);
       }
-      x += w + spacing(fs);
+      x += w + gapAfter(tokens, i, fs);
     }
   }
 
@@ -302,6 +323,14 @@
     // Answer box
     doc.setDrawColor.apply(doc, BORDER);
     doc.line(x, top + bodyH, x + CARD_W, top + bodyH);
+    if (q.answerHint) {
+      // e.g. "R" so the child writes the quotient left and remainder right.
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor.apply(doc, MUTED);
+      doc.text(q.answerHint, x + CARD_W * 0.62, top + bodyH + ANSWER_H / 2 + 3.2, { align: 'center' });
+      doc.setTextColor.apply(doc, INK);
+    }
   }
 
   function rowBodyHeight(row) {

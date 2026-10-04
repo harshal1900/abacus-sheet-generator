@@ -10,7 +10,8 @@
  *   { kind: 'inline', tokens: [...tokens],           answer: [...tokens] }
  * plus: type (mix item type), level, spec (index of the mix item used).
  * Tokens are { t: 'num' | 'text' | 'op', v } | { t: 'frac', n, d }
- *          | { t: 'root', v, index }.
+ *          | { t: 'root', v, index } | { t: 'pow', v, e }
+ *          | { t: 'fn', v: 'LCM' | 'HCF', args: [...] }.
  */
 (function (root) {
   'use strict';
@@ -356,7 +357,7 @@
   // "3/4 of 48"
   function buildFracOf(rng) {
     var f = properFraction(rng), n = f[0], d = f[1];
-    var base = d * rng.int(2, 25);
+    var base = d * rng.int(4, 25);
     return {
       kind: 'inline',
       tokens: [frac(n, d), text('of'), num(base)],
@@ -407,10 +408,112 @@
     return { kind: 'inline', tokens: tokens, answer: [num(v)] };
   }
 
+  /*
+   * Negative-number sum: numbers may be negative and the total may go below
+   * zero (mental maths, not bead work). At least one subtotal is negative.
+   */
+  function buildNegSum(rng, item) {
+    for (var tries = 0; tries < 50; tries++) {
+      var rows = rng.int(item.rows[0], item.rows[1]);
+      var values = [], total = 0, wentNegative = false;
+      for (var i = 0; i < rows; i++) {
+        var v = rng.digits(rng.int(item.digits[0], item.digits[1]));
+        if (rng.chance(i === 0 ? 0.6 : 0.5)) v = -v;
+        values.push(v);
+        total += v;
+        if (total < 0) wentNegative = true;
+      }
+      if (!wentNegative || total === 0) continue;
+      return {
+        kind: 'stack',
+        lines: values.map(String),
+        answer: [num(total)]
+      };
+    }
+    return null;
+  }
+
+  // Division with remainder: 347 ÷ 6 = 57 R 5. The remainder is never 0.
+  function buildDivRem(rng, item) {
+    var lo = Math.pow(10, item.dd - 1), hi = Math.pow(10, item.dd) - 1;
+    for (var tries = 0; tries < 200; tries++) {
+      var divisor = rng.digits(item.dv);
+      if (divisor < 3 || divisor % 10 === 0) continue;
+      var dividend = rng.int(lo, hi);
+      var q = Math.floor(dividend / divisor), r = dividend % divisor;
+      if (q < 2 || r === 0) continue;
+      return {
+        kind: 'stack',
+        lines: [String(dividend), '÷' + divisor],
+        answer: [num(q + ' R ' + r)],
+        answerHint: 'R'
+      };
+    }
+    return null;
+  }
+
+  function buildPower(e) {
+    return function (rng, item) {
+      var n;
+      do { n = rng.digits(rng.int(item.digits[0], item.digits[1])); } while (n % 10 === 0 || n < 11);
+      return {
+        kind: 'inline',
+        tokens: [{ t: 'pow', v: String(n), e: String(e) }],
+        answer: [num(Math.pow(n, e))]
+      };
+    };
+  }
+
+  function lcm(a, b) { return (a / gcd(a, b)) * b; }
+
+  function distinctSorted(list) {
+    var out = list.slice().sort(function (a, b) { return a - b; });
+    for (var i = 1; i < out.length; i++) if (out[i] === out[i - 1]) return null;
+    return out;
+  }
+
+  function fn(name, nums) { return { t: 'fn', v: name, args: nums.map(String) }; }
+
+  // LCM of 2-3 small numbers that share a factor (so it is not just a product).
+  function buildLcm(rng, item) {
+    for (var tries = 0; tries < 200; tries++) {
+      var k = rng.int(item.count[0], item.count[1]);
+      var list = [];
+      for (var i = 0; i < k; i++) list.push(rng.int(2, item.max));
+      list = distinctSorted(list);
+      if (!list) continue;
+      var l = list.reduce(lcm), p = list.reduce(function (a, b) { return a * b; });
+      if (l === p || l > 999 || l === list[list.length - 1]) continue;
+      return { kind: 'inline', tokens: [fn('LCM', list)], answer: [num(l)] };
+    }
+    return null;
+  }
+
+  // HCF of 2-3 numbers built as h × (small multipliers with no common factor).
+  function buildHcf(rng, item) {
+    for (var tries = 0; tries < 200; tries++) {
+      var k = rng.int(item.count[0], item.count[1]);
+      var h = rng.int(2, 15), list = [];
+      for (var i = 0; i < k; i++) list.push(h * rng.int(2, 9));
+      list = distinctSorted(list);
+      if (!list || list[list.length - 1] > item.max) continue;
+      var g = list.reduce(gcd);
+      if (g !== h) continue;
+      return { kind: 'inline', tokens: [fn('HCF', list)], answer: [num(g)] };
+    }
+    return null;
+  }
+
   var BUILDERS = {
     addsub: buildAddSub,
+    negsum: buildNegSum,
     mul: buildMul,
     div: buildDiv,
+    divrem: buildDivRem,
+    square: buildPower(2),
+    cube: buildPower(3),
+    lcm: buildLcm,
+    hcf: buildHcf,
     pct: buildPct,
     sqrt: buildSqrt,
     cbrt: buildCbrt,
