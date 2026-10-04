@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Abacus Worksheet Maker</title>
+  <meta name="description" content="Make printable abacus practice worksheets (PDF) for levels 1 to 8 with an answer key.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='8' width='56' height='48' rx='6' fill='none' stroke='%23343a40' stroke-width='5'/%3E%3Cline x1='4' y1='24' x2='60' y2='24' stroke='%23343a40' stroke-width='4'/%3E%3Ccircle cx='18' cy='17' r='5' fill='%23fa5252'/%3E%3Ccircle cx='32' cy='35' r='5' fill='%2340c057'/%3E%3Ccircle cx='46' cy='44' r='5' fill='%23228be6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <svg class="hero-abacus" viewBox="0 0 120 80" aria-hidden="true">
+        <rect x="4" y="4" width="112" height="72" rx="8" class="frame"/>
+        <line x1="4" y1="28" x2="116" y2="28" class="beam"/>
+        <g class="rods">
+          <line x1="22" y1="8" x2="22" y2="72"/><line x1="41" y1="8" x2="41" y2="72"/>
+          <line x1="60" y1="8" x2="60" y2="72"/><line x1="79" y1="8" x2="79" y2="72"/>
+          <line x1="98" y1="8" x2="98" y2="72"/>
+        </g>
+        <g class="bead b1"><ellipse cx="22" cy="22" rx="8" ry="5"/><ellipse cx="22" cy="35" rx="8" ry="5"/><ellipse cx="22" cy="57" rx="8" ry="5"/><ellipse cx="22" cy="68" rx="8" ry="5"/></g>
+        <g class="bead b2"><ellipse cx="41" cy="12" rx="8" ry="5"/><ellipse cx="41" cy="35" rx="8" ry="5"/><ellipse cx="41" cy="46" rx="8" ry="5"/><ellipse cx="41" cy="68" rx="8" ry="5"/></g>
+        <g class="bead b3"><ellipse cx="60" cy="22" rx="8" ry="5"/><ellipse cx="60" cy="46" rx="8" ry="5"/><ellipse cx="60" cy="57" rx="8" ry="5"/><ellipse cx="60" cy="68" rx="8" ry="5"/></g>
+        <g class="bead b4"><ellipse cx="79" cy="12" rx="8" ry="5"/><ellipse cx="79" cy="35" rx="8" ry="5"/><ellipse cx="79" cy="46" rx="8" ry="5"/><ellipse cx="79" cy="57" rx="8" ry="5"/></g>
+        <g class="bead b5"><ellipse cx="98" cy="22" rx="8" ry="5"/><ellipse cx="98" cy="57" rx="8" ry="5"/><ellipse cx="98" cy="68" rx="8" ry="5"/><ellipse cx="98" cy="46" rx="8" ry="5"/></g>
+      </svg>
+      <h1>Abacus Worksheet Maker</h1>
+      <p>Pick a level, choose how many questions, then print and practise!</p>
+    </header>
+
+    <section class="card" aria-labelledby="step1">
+      <h2 id="step1"><span class="step">1</span> Choose your level</h2>
+      <div class="levels" id="levels" role="radiogroup" aria-labelledby="step1"></div>
+    </section>
+
+    <section class="card" aria-labelledby="step2">
+      <h2 id="step2"><span class="step">2</span> How many questions?</h2>
+      <div class="count">
+        <button type="button" class="round" id="minus" aria-label="Fewer questions">&minus;</button>
+        <input type="number" id="count" min="10" max="500" step="1" value="100" inputmode="numeric" aria-label="Number of questions">
+        <button type="button" class="round" id="plus" aria-label="More questions">+</button>
+      </div>
+      <input type="range" id="slider" min="10" max="500" step="10" value="100" aria-label="Number of questions slider">
+      <div class="presets" id="presets">
+        <button type="button" data-n="25">25</button>
+        <button type="button" data-n="50">50</button>
+        <button type="button" data-n="100">100</button>
+        <button type="button" data-n="200">200</button>
+        <button type="button" data-n="500">500</button>
+      </div>
+    </section>
+
+    <button type="button" class="go" id="generate">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg>
+      Generate Worksheet
+    </button>
+
+    <section class="result" id="result" hidden aria-live="polite">
+      <div class="result-icon" aria-hidden="true">&#10003;</div>
+      <div class="result-text">
+        <strong>Your worksheet is ready!</strong>
+        <span id="resultInfo"></span>
+      </div>
+      <div class="result-actions">
+        <a class="btn primary" id="openBtn" target="_blank" rel="noopener">Open &amp; Print</a>
+        <a class="btn" id="downloadBtn">Download PDF</a>
+      </div>
+    </section>
+
+    <p class="error" id="error" hidden></p>
+
+    <footer class="tips">
+      <p><strong>Every sheet is different.</strong> Operations, digits and number of rows are mixed up each time. The answer key is at the end, after a blank page, so you can print double-sided without the answers showing through.</p>
+    </footer>
+  </main>
+
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="js/generator.js"></script>
+  <script src="js/pdf.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
