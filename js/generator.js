@@ -537,24 +537,49 @@
     return carry ? carry + out : out;
   }
 
+  // [lo, hi] digit range from a number (fixed length) or a [lo, hi] pair.
+  function digitRange(d) {
+    var r = Array.isArray(d) ? d : [d, d];
+    var lo = Math.max(1, Math.min(18, Math.round(r[0])));
+    var hi = Math.max(lo, Math.min(18, Math.round(r[1])));
+    return [lo, hi];
+  }
+
+  function digitLabel(range) {
+    return range[0] === range[1] ? String(range[0]) : range[0] + '-' + range[1];
+  }
+
+  // Random digit string with a length in `range`, never a leading zero.
+  function randomDigits(rng, range) {
+    var len = rng.int(range[0], range[1]);
+    var n = String(rng.int(1, 9));
+    for (var i = 1; i < len; i++) n += rng.int(0, 9);
+    return n;
+  }
+
+  // How many different numbers exist with a length in `range`.
+  function numbersInRange(range) {
+    return Math.pow(10, range[1]) - Math.pow(10, range[0] - 1);
+  }
+
   /*
-   * Quick Drill: one random number per row (no leading zero); the child
-   * writes number × each multiplier.
-   *   opts: { digits, multipliers } override QUICK_DRILL in config.js
+   * Quick Drill: one random number per row (no leading zero, random length
+   * in QUICK_DRILL.digits); the child writes number × each multiplier.
+   *   opts: { digits, multipliers } override QUICK_DRILL in config.js;
+   *         digits may be a number (fixed length) or [lo, hi]
    */
   function generateQuickDrill(count, sheetId, opts) {
     opts = opts || {};
     var Q = CONFIG.QUICK_DRILL;
-    var digits = Math.max(1, Math.min(18, Math.round(opts.digits || Q.digits)));
+    var range = digitRange(opts.digits || Q.digits);
     var multipliers = opts.multipliers || Q.multipliers;
     var id = sheetId || newSheetId();
     count = clampCount(count);
-    var rng = new Rng(seedFromId(id + ':quick:' + count + ':' + digits + ':' + multipliers.join(',')));
+    var rng = new Rng(seedFromId(id + ':quick:' + count + ':' + range.join('-') + ':' + multipliers.join(',')));
     var rows = [], seen = {};
     var maxAttempts = count * 40 + 200;
     for (var attempts = 0; rows.length < count && attempts < maxAttempts; attempts++) {
-      var n = String(rng.int(1, 9));
-      for (var i = 1; i < digits; i++) n += rng.int(0, 9);
+      var n = randomDigits(rng, range);
       if (seen[n]) continue;
       seen[n] = true;
       rows.push({
@@ -564,13 +589,25 @@
     }
     var warning = null;
     if (rows.length < count) {
-      warning = 'Only ' + rows.length + ' different ' + digits + '-digit numbers exist, ' +
-        'so the sheet has ' + rows.length + ' rows instead of ' + count + '.';
+      warning = 'Only ' + Math.min(rows.length, numbersInRange(range)) + ' different ' + digitLabel(range) +
+        '-digit numbers exist, so the sheet has ' + rows.length + ' rows instead of ' + count + '.';
     }
     return {
       type: 'quick', id: id, level: 'quick', count: rows.length,
-      digits: digits, multipliers: multipliers.slice(), rows: rows,
+      digits: range, digitLabel: digitLabel(range), multipliers: multipliers.slice(), rows: rows,
       rowsPerTable: Q.rowsPerTable, warning: warning
+    };
+  }
+
+  // A Quick Drill question as a card for All Levels mode: number × 2 or × 5.
+  function buildQuickCard(rng) {
+    var Q = CONFIG.QUICK_DRILL;
+    var n = randomDigits(rng, digitRange(Q.digits));
+    var m = rng.pick(Q.multipliers);
+    return {
+      kind: 'stack',
+      lines: [n, '×' + m],
+      answer: [num(mulString(n, m))]
     };
   }
 
@@ -606,19 +643,27 @@
     var questions = [];
     var maxAttempts = count * 40 + 200;
     for (var attempts = 0; questions.length < count && attempts < maxAttempts; attempts++) {
-      var lv = level === 'all' ? Number(rng.pick(keys)) : Number(level);
-      var L = levels[lv];
-      if (!L) throw new Error('Unknown level: ' + level);
-      var spec = rng.weightedIndex(L.mix);
-      var item = L.mix[spec];
-      var build = BUILDERS[item.type];
-      if (!build) throw new Error('Unknown question type: ' + item.type);
-      var q = build(rng, item, L);
+      var q, lv, spec = null, type;
+      if (level === 'all' && !opts.levels && rng.chance(CONFIG.ALL_LEVELS.quickShare)) {
+        q = buildQuickCard(rng);
+        lv = 'quick';
+        type = 'quick';
+      } else {
+        lv = level === 'all' ? Number(rng.pick(keys)) : Number(level);
+        var L = levels[lv];
+        if (!L) throw new Error('Unknown level: ' + level);
+        spec = rng.weightedIndex(L.mix);
+        var item = L.mix[spec];
+        var build = BUILDERS[item.type];
+        if (!build) throw new Error('Unknown question type: ' + item.type);
+        q = build(rng, item, L);
+        type = item.type;
+      }
       if (!q) continue;
       var sig = signature(q);
       if (seen[sig]) continue;
       seen[sig] = true;
-      q.type = item.type;
+      q.type = type;
       q.level = lv;
       q.spec = spec;
       questions.push(q);

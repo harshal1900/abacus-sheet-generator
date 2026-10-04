@@ -183,7 +183,7 @@
   function levelLabel(sheet, LEVELS) {
     if (sheet.type === 'quick') {
       return 'Quick Drill - number ' + sheet.multipliers.map(function (m) { return '× ' + m; }).join(' and ') +
-        '   |   ' + sheet.digits + '-digit numbers';
+        '   |   ' + sheet.digitLabel + '-digit numbers';
     }
     if (sheet.level === 'all') return 'All Levels (1-8 mixed)';
     var L = LEVELS[sheet.level];
@@ -312,7 +312,7 @@
       doc.setFont(FONT, 'normal');
       doc.setFontSize(6.5);
       doc.setTextColor.apply(doc, MUTED);
-      doc.text('L' + q.level, x + CARD_W - 3, y + 9.5, { align: 'right' });
+      doc.text(q.level === 'quick' ? 'QD' : 'L' + q.level, x + CARD_W - 3, y + 9.5, { align: 'right' });
       doc.setTextColor.apply(doc, INK);
     }
 
